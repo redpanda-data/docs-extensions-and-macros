@@ -4,6 +4,7 @@ const fs = require('fs')
 const path = require('path')
 const handlebars = require('handlebars')
 const helpers = require('./helpers')
+const { formatInlineCode } = require('../../extension-utils/inline-code')
 
 /**
  * The default to print in a flag's row, or undefined to print none. Follows
@@ -2017,6 +2018,14 @@ function formatDescription(desc, customTransformations = null, options = {}) {
   // _redpanda.audit_log, ...). The leading underscore is also an AsciiDoc
   // italics delimiter, so these must never render as bare prose.
   result = result.replace(/(?<![`\w/])(_redpanda(?:\.[a-z_]+)+)(?!`)/g, '`$1`')
+
+  // snake_case names (default_topic_partitions, rpk.admin_api) and other
+  // absolute paths (/v1/brokers) are code too. CLI help text holds no
+  // backticks (pflag reads the first span of a flag usage as the --help
+  // value placeholder), so the page adds them. The same patterns drive the
+  // lint rule missing-inline-code, which is why the rpk and connect
+  // surfaces declare these kinds in convention.auto_inline_code.
+  result = formatInlineCode(result, { kinds: ['identifier', 'path'] })
 
   // Add backticks around standalone "rpk" (at end of phrase, before punctuation)
   // Also exclude rpk inside paths (preceded by /) and inside a dotted name

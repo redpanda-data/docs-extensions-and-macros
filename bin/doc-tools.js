@@ -2579,6 +2579,52 @@ automation
   })
 
 /**
+ * generate operator-flags
+ *
+ * @description
+ * Generates the Redpanda Operator flag reference (reference:k-operator-flags.adoc) and the
+ * operator-flags-<version>.json attachment that the opflag: and opflagval: macros read. Builds
+ * the operator's own `run` command at the given release with Go and walks every flag it
+ * registers, deprecated and hidden ones included, so types and defaults match the release.
+ *
+ * @example
+ * npx doc-tools generate operator-flags --tag operator/v26.2.5
+ * npx doc-tools generate operator-flags --tag operator/v26.3.1 --source-dir ../redpanda-operator
+ * npx doc-tools generate operator-flags --source-dir ../redpanda-operator --operator-version v26.3.1
+ *
+ * @requirements
+ * - Go toolchain
+ * - A GitHub token (REDPANDA_GITHUB_TOKEN, GITHUB_TOKEN or GH_TOKEN) to clone the private operator repository, unless --source-dir is given
+ */
+automation
+  .command('operator-flags')
+  .description('Generate the Redpanda Operator flag reference and its data from an operator release. Requires --tag, --branch or --source-dir.')
+  .option('-t, --tag <operatorTag>', 'Operator release tag, such as operator/v26.2.5')
+  .option('-b, --branch <branch>', 'Operator branch for in-progress content (requires --operator-version)')
+  .option('--operator-version <version>', 'The operator version the output is for, such as v26.3.1 (defaults to the tag)')
+  .option('--source-dir <dir>', 'An existing redpanda-operator checkout to read instead of cloning. With --tag, the tag is recorded as the source ref')
+  .option('--docs-dir <dir>', 'The docs checkout to write into', '.')
+  .option('--data-only', 'Write the JSON attachment only, not the reference page')
+  .action((opts) => {
+    try {
+      const { generateOperatorFlags } = require('../tools/operator-flags')
+      const result = generateOperatorFlags({
+        tag: opts.tag,
+        branch: opts.branch,
+        version: opts.operatorVersion,
+        sourceDir: opts.sourceDir,
+        docsDir: opts.docsDir,
+        dataOnly: Boolean(opts.dataOnly),
+      })
+      console.log(`Done: ${result.flags} flags (${result.deprecated} deprecated) for Redpanda Operator ${result.version}.`)
+      process.exit(0)
+    } catch (err) {
+      console.error(`Error: ${err.message}`)
+      process.exit(1)
+    }
+  })
+
+/**
  * generate crd-spec
  *
  * @description
@@ -3901,8 +3947,8 @@ programCli
   .description('Check prose, shell blocks and YAML against the property, rpk and Connect data: report hand-written values the value macros could render, and unknown or deprecated commands, flags, components and fields')
   .option('--docs-dir <path>', 'Root of the repo being scanned (antora.yml and modules/)', '.')
   .option('--lender <path...>', 'Other component checkouts read into the same catalog, so data is selected exactly as the macros select it (for example ../docs ../rp-connect-docs)')
-  .option('--kinds <list>', 'Comma-separated kinds to run: properties, rpk, connect (default: all; a named kind with no data is a setup error)')
-  .option('--data-file <path...>', 'Dataset files that bypass selection, recognized by name: redpanda-properties-v<tag>.json, rpk-v<version>.json (the docs-data snapshot works), connect-<version>.json')
+  .option('--kinds <list>', 'Comma-separated kinds to run: properties, rpk, connect, operator (default: all; a named kind with no data is a setup error)')
+  .option('--data-file <path...>', 'Dataset files that bypass selection, recognized by name: redpanda-properties-v<tag>.json, rpk-v<version>.json (the docs-data snapshot works), connect-<version>.json, operator-flags-v<version>.json')
   .option('--files <path...>', 'Scan only these files, relative to --docs-dir')
   .option('--report-dir <path>', 'Where to write reference-values-report.json and reference-values-report.md', '.')
   .option('--write', 'Apply auto-safe exact replacements with the value macros, and rewrite writable aliases and deprecated names to the main or replacement name')

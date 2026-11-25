@@ -1,0 +1,258 @@
+'use strict'
+
+const fs = require('fs')
+const os = require('os')
+const path = require('path')
+const { renderPage, escapeAttributes } = require('../../../tools/operator-flags/render-page')
+const { buildData, withoutTicketKeys, versionOfRef, dumpFlags } = require('../../../tools/operator-flags')
+const { spawnSync } = require('child_process')
+const { scanOperator, yamlListItems, flagsIn, stripYamlComment } = require('../../../tools/reference-values/operator')
+const { isOnPage } = require('../../../extension-utils/operator-flags')
+const { formatInlineCode } = require('../../../extension-utils/inline-code')
+
+const BIN = path.join(__dirname, '..', '..', '..', 'bin', 'doc-tools.js')
+
+const SAMPLE = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'fixtures', 'operator-flags', 'operator-flags-v26.2.5.json'), 'utf8'))
+
+describe('versionOfRef', () => {
+  test.each([
+    ['operator/v26.2.5', 'v26.2.5'],
+    ['v26.2.5', 'v26.2.5'],
+    ['operator/v26.3.1-beta.1', 'v26.3.1-beta.1'],
+    ['main', undefined],
+    ['operator/v2.4.x', undefined],
+  ])('%s -> %s', (ref, version) => expect(versionOfRef(ref)).toBe(version))
+})
+
+describe('buildData', () => {
+  test('sorts flags, drops empty fields and records the source', () => {
+    const data = buildData({
+      command: 'run',
+      flags: [
+        { name: 'zeta', type: 'bool', default: 'false', usage: 'Z', shorthand: '', deprecated: '', hidden: false },
+        { name: 'alpha', type: 'string', default: '', usage: 'A', deprecated: 'use beta', hidden: true },
+      ],
+      global_flags: [{ name: 'log-level', type: 'string', default: 'info', usage: 'L' }],
+    }, { version: 'v26.2.5', ref: 'operator/v26.2.5', now: new Date('2026-11-23T00:00:00Z') })
+    expect(data).toEqual({
+      schema: 1,
+      operator_version: 'v26.2.5',
+      generated_at: '2026-11-23T00:00:00.000Z',
+      source: { ref: 'operator/v26.2.5' },
+      command: 'run',
+      flags: [
+        { name: 'alpha', type: 'string', default: '', usage: 'A', deprecated: 'use beta', hidden: true },
+        { name: 'zeta', type: 'bool', default: 'false', usage: 'Z' },
+      ],
+      global_flags: [{ name: 'log-level', type: 'string', default: 'info', usage: 'L' }],
+    })
+  })
+})
+
+// The operator's own help text for --wipe-stale-disk-after at operator/v26.3.1
+// names an internal ticket.
+describe('internal ticket keys in help text', () => {
+  const USAGE = 'How long a broker pod must stay not-Ready with a stale on-disk identity (a decommissioned-broker bad_rejoin, K8S-843) before the operator wipes it.'
+
+  test('a key that ends a list goes with its comma', () => {
+    expect(withoutTicketKeys(USAGE)).toEqual({
+      text: 'How long a broker pod must stay not-Ready with a stale on-disk identity (a decommissioned-broker bad_rejoin) before the operator wipes it.',
+      removed: ['K8S-843'],
+    })
+  })
+
+  test('a key in its own parentheses goes with them, and a bare key goes alone', () => {
+    expect(withoutTicketKeys('Wipe the disk (K8S-843) after this long.').text).toBe('Wipe the disk after this long.')
+    expect(withoutTicketKeys('See DOC-12 for the reason.').text).toBe('See for the reason.')
+  })
+
+  test('a key that names a public standard stays', () => {
+    const text = 'A DNS label (RFC-1123), hashed with SHA-256, encoded as UTF-8.'
+    expect(withoutTicketKeys(text)).toEqual({ text, removed: [] })
+  })
+
+  test('the published data has no ticket key, and the run says what it left out', () => {
+    const lines = []
+    const data = buildData({ flags: [{ name: 'wipe-stale-disk-after', type: 'duration', default: '0s', usage: USAGE }] }, { version: 'v26.3.1', ref: 'operator/v26.3.1', log: (l) => lines.push(l) })
+    expect(JSON.stringify(data)).not.toContain('K8S-843')
+    expect(lines).toEqual(['--wipe-stale-disk-after: left the internal ticket key K8S-843 out of the help text. Remove it at the source too.'])
+  })
+})
+
+describe('dumpFlags', () => {
+  test('refuses a directory that is not an operator checkout', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'not-operator-'))
+    expect(() => dumpFlags(dir)).toThrow(/no operator\/go\.mod/)
+    fs.rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+describe('generate operator-flags CLI', () => {
+  test('--operator-version with a space reaches the generator, not the root --version', () => {
+    const result = spawnSync(process.execPath, [BIN, 'generate', 'operator-flags', '--operator-version', 'v26.3.1', '--source-dir', '/nonexistent'], { encoding: 'utf8' })
+    expect(result.status).toBe(1)
+    expect(result.stderr).toMatch(/\/nonexistent has no operator\/go\.mod/)
+    expect(result.stdout).not.toContain(require('../../../package.json').version)
+  })
+})
+
+describe('isOnPage and formatInlineCode', () => {
+  test('every flag but a hidden-only one is on the page', () => {
+    expect(isOnPage({ name: 'a' })).toBe(true)
+    expect(isOnPage({ name: 'a', hidden: true })).toBe(false)
+    expect(isOnPage({ name: 'a', hidden: true, deprecated: 'use b' })).toBe(true)
+  })
+
+  test('puts --flags in code and leaves existing backtick spans alone', () => {
+    expect(formatInlineCode('Use --a, --b=x or (--c). Not -- or --d=y.')).toBe('Use `--a`, `--b=x` or (`--c`). Not -- or `--d=y`.')
+    expect(formatInlineCode('Keep `--a` and --b')).toBe('Keep `--a` and `--b`')
+  })
+
+  test('a comma inside a --flag=value does not end the span', () => {
+    expect(formatInlineCode('Pass --additional-controllers=a,b, then restart.')).toBe('Pass `--additional-controllers=a,b`, then restart.')
+  })
+})
+
+describe('renderPage', () => {
+  const page = renderPage(SAMPLE)
+
+  test('starts with the generated-content marker and names the release', () => {
+    expect(page.split('\n')[0]).toMatch(/^\/\/ This content is autogenerated\. Do not edit manually\. Generated by doc-tools \(operator-flags\) from the run command of the Redpanda Operator at operator\/v26\.2\.5\./)
+  })
+
+  // The marker is published in the page's Markdown twin.
+  test('the marker names no private repository and no source path', () => {
+    const marker = page.split('\n')[0]
+    expect(marker).not.toMatch(/operator-enterprise|redpanda-data\/|run\.go|cmd\/run/)
+    expect(page).toContain(':description: Command-line flags of the Redpanda Operator v26.2.5')
+  })
+
+  test('gives every published flag an anchor named after it', () => {
+    for (const name of ['cluster-domain', 'namespace', 'unbind-pvcs-after', 'log-level', 'allow-pv-rebinding']) {
+      expect(page).toContain(`[[${name}]]\n=== --${name}\n`)
+    }
+  })
+
+  test('leaves out hidden-only flags and puts deprecated ones in their own section', () => {
+    expect(page).not.toContain('unsafe-decommission-failed-brokers')
+    const deprecatedAt = page.indexOf('== Deprecated flags')
+    expect(deprecatedAt).toBeGreaterThan(page.indexOf('== Logging flags'))
+    expect(page.indexOf('[[allow-pv-rebinding]]')).toBeGreaterThan(deprecatedAt)
+    expect(page).toContain("IMPORTANT: This flag is deprecated. The PVCUnbinder's safety checks replace it.")
+  })
+
+  test('renders type and default as literal code, and an empty default as ""', () => {
+    expect(page).toContain('[[unbind-pvcs-after]]\n=== --unbind-pvcs-after\n\nHow long a broker Pod stays Pending before the PVCUnbinder unbinds its claims. 0 disables the PVCUnbinder.\n\n[horizontal]\nType:: `+duration+`\nDefault:: `+0s+`\n')
+    expect(page).toMatch(/=== --namespace\n\n[^\n]+\n\n\[horizontal\]\nType:: `\+string\+`\nDefault:: `\+""\+`\n/)
+    expect(page).not.toContain('Default:: None')
+  })
+
+  test('formats --flags in usage as code and ends each usage paragraph with a period', () => {
+    expect(page).toContain("Kubernetes cluster domain, as set by the kubelet's `--cluster-domain`.\n")
+    const one = renderPage({ ...SAMPLE, flags: [{ name: 'a', type: 'bool', default: 'false', usage: 'Is it on?' }, { name: 'b', type: 'bool', default: 'false', usage: 'Done.' }], global_flags: [] })
+    expect(one).toContain('\nIs it on?\n')
+    expect(one).toContain('\nDone.\n')
+  })
+
+  test('formats snake_case names, paths and URLs in usage as code', () => {
+    const one = renderPage({ ...SAMPLE, flags: [{ name: 'a', type: 'string', default: '', usage: 'Sets default_topic_partitions from /etc/redpanda/redpanda.yaml; see https://example.com/x' }], global_flags: [] })
+    expect(one).toContain('\nSets `default_topic_partitions` from `/etc/redpanda/redpanda.yaml`; see `https://example.com/x`.\n')
+  })
+
+  test('a value with + renders through pass:c, never as {plus}', () => {
+    const one = renderPage({ ...SAMPLE, flags: [{ name: 'tz', type: 'string', default: '+00:00', usage: 'Offset' }], global_flags: [] })
+    expect(one).toContain('Default:: `pass:c[+00:00]`')
+    expect(one).not.toContain('{plus}')
+    const html = require('@asciidoctor/core')().convert(one)
+    expect(html).toContain('<code>+00:00</code>')
+  })
+
+  test('lists a deprecated global flag in the Deprecated flags section', () => {
+    const one = renderPage({ ...SAMPLE, global_flags: [...SAMPLE.global_flags, { name: 'log-encoding', type: 'string', default: 'json', usage: 'Log encoding', deprecated: 'use --log-format' }] })
+    const deprecatedAt = one.indexOf('== Deprecated flags')
+    expect(one.indexOf('[[log-encoding]]')).toBeGreaterThan(deprecatedAt)
+    expect(one).toContain('IMPORTANT: This flag is deprecated. Use `--log-format`.')
+  })
+
+  test('says defaults are the binary\'s, that the chart passes some flags, and scopes multicluster', () => {
+    expect(page).toContain("Each default is the operator binary's built-in default")
+    expect(page).toContain('xref:reference:k-operator-helm-spec.adoc[]')
+    expect(page).toContain('When `multicluster.enabled` is `true`, the chart runs the `redpanda-operator multicluster` command')
+  })
+
+  test('escapes attribute references in help text', () => {
+    expect(escapeAttributes('agents/{agent}/x and \\{kept}')).toBe('agents/\\{agent}/x and \\{kept}')
+  })
+})
+
+describe('check-reference-values operator kind', () => {
+  const registry = { tag: 'v26.2.5', data: SAMPLE, component: 'streaming', version: '26.2', kind: require('../../../extension-utils/operator-flags').OPERATOR_FLAGS_KIND }
+  let dir
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'opflag-scan-'))
+    fs.mkdirSync(path.join(dir, 'modules', 'manage', 'pages'), { recursive: true })
+  })
+  afterEach(() => fs.rmSync(dir, { recursive: true, force: true }))
+  const write = (text) => fs.writeFileSync(path.join(dir, 'modules', 'manage', 'pages', 'p.adoc'), text)
+  const scan = () => scanOperator({ docsDir: dir, registry }).findings.map((f) => [f.line, f.severity, f.reason, f.written])
+
+  test('checks the items of an additionalCmdFlags list in YAML', () => {
+    write(['[,yaml]', '----', 'additionalCmdFlags:', '  - --unbind-pvcs-after=60s <1>', '  - "--allow-pv-rebinding"', '  - --no-such-flag', 'other: 1', '  - --not-checked', '----'].join('\n'))
+    expect(scan()).toEqual([
+      [5, 'warning', 'deprecated operator flag', '--allow-pv-rebinding'],
+      [6, 'error', 'unknown operator flag', '--no-such-flag'],
+    ])
+  })
+
+  test('checks the first item of an unquoted inline list, and keys with a comment or callout', () => {
+    expect(yamlListItems(['additionalCmdFlags: [--a, --b]']).map((i) => flagsIn(i.text))).toEqual([['--a', '--b']])
+    expect(yamlListItems(['additionalCmdFlags: ["--a", "--b"] # <1>']).map((i) => flagsIn(i.text))).toEqual([['--a', '--b']])
+    expect(yamlListItems(['additionalCmdFlags: ["--a"] <1>']).map((i) => flagsIn(i.text))).toEqual([['--a']])
+    expect(yamlListItems(['additionalCmdFlags: # flags', '  - --a']).map((i) => flagsIn(i.text))).toEqual([['--a']])
+    write(['additionalCmdFlags: [--bogus, --namespace=x]', "  --set additionalCmdFlags=\"{--nope,--namespace=y}\""].join('\n'))
+    expect(scan()).toEqual([
+      [2, 'error', 'unknown operator flag', '--nope'],
+      [1, 'error', 'unknown operator flag', '--bogus'],
+    ])
+  })
+
+  test('ignores flag-shaped words in YAML item comments', () => {
+    expect(stripYamlComment('--a # was --old-flag')).toBe('--a')
+    expect(stripYamlComment('"--a=#x" # c')).toBe('"--a=#x"')
+    expect(stripYamlComment('--a=b#c')).toBe('--a=b#c')
+    write(['additionalCmdFlags:', '  - --namespace=x # replaces --old-flag', '  - --allow-pv-rebinding'].join('\n'))
+    const findings = scanOperator({ docsDir: dir, registry }).findings
+    expect(findings.map((f) => f.written)).toEqual(['--allow-pv-rebinding'])
+    expect(findings[0].note).toMatch(/value-check: ignore above the block/)
+  })
+
+  test('checks a Helm --set value and an inline YAML list', () => {
+    write(["  --set 'additionalCmdFlags={--unbind-pvcs-after=60s,--bogus}'", '  --set additionalCmdFlags[0]=--allow-pv-rebinding', 'additionalCmdFlags: ["--namespace=x"]'].join('\n'))
+    expect(scan()).toEqual([
+      [1, 'error', 'unknown operator flag', '--bogus'],
+      [2, 'warning', 'deprecated operator flag', '--allow-pv-rebinding'],
+    ])
+  })
+
+  test('checks opflag: and opflagval: calls, honoring deprecated=ok', () => {
+    write(['Use opflag:[--unbind-pvcs-after] and opflagval:[--namespac,default].', 'Not opflag:[--allow-pv-rebinding] but opflag:[--allow-pv-rebinding,deprecated=ok].'].join('\n'))
+    expect(scan()).toEqual([
+      [1, 'error', 'unknown operator flag', 'opflagval:[--namespac,default]'],
+      [2, 'warning', 'deprecated operator flag', 'opflag:[--allow-pv-rebinding]'],
+    ])
+  })
+
+  test('never guesses at flags in prose', () => {
+    write('Run `rpk topic create --partitions 3` or pass `--no-such-flag`.')
+    expect(scan()).toEqual([])
+  })
+
+  test('skips generated pages', () => {
+    write('// This content is autogenerated. Do not edit manually.\nadditionalCmdFlags:\n  - --bogus')
+    expect(scan()).toEqual([])
+  })
+
+  test('yamlListItems stops at the next key', () => {
+    expect(yamlListItems(['additionalCmdFlags:', '  - a', '', '  # c', '  - b', 'next: 1', '  - c'])).toEqual([{ line: 2, text: 'a' }, { line: 5, text: 'b' }])
+  })
+})

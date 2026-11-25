@@ -121,7 +121,7 @@ on:
   workflow_call:
     inputs:
       surfaces:
-        description: "Comma-separated lint surfaces (properties,rpk,metrics,helm,crd,connect). Empty = all."
+        description: "Comma-separated lint surfaces (properties,rpk,metrics,helm,crd,connect,api,operator). Empty = all."
         type: string
         default: ""
       dispatch_repo:
@@ -1030,8 +1030,8 @@ jobs:
             You are reviewing user-facing doc strings only: strings that doc
             generators publish verbatim (config property descriptions, metric
             help, rpk cobra help, Helm values comments, CRD field comments,
-            Redpanda Connect component specs, fields, Bloblang plugins and
-            `rpk connect` help). The PR's source diff is in pr-diff.patch
+            Redpanda Connect component specs, fields, Bloblang plugins,
+            `rpk connect` help, and Redpanda Operator `run` flag usage). The PR's source diff is in pr-diff.patch
             (generated docs, lockfiles and vendored code are left out; never
             use gh pr diff). Read it with the Read tool, and page through a
             large file with offset and limit until you reach the end:
@@ -1097,7 +1097,8 @@ jobs:
               ("Specifies ...", never the Go field name or the json: tag
               key) and keep +kubebuilder marker lines
               byte-identical; Helm comments keep the # -- marker conventions;
-              connect strings follow CONNECT STRINGS below.
+              connect strings follow CONNECT STRINGS below; operator flag
+              strings follow OPERATOR FLAGS below.
             - ends with this line, exactly, using the declaration's
               fingerprint from lint-findings.json:
               <sub>doc-strings-review:fp=FINGERPRINT</sub>
@@ -1152,6 +1153,39 @@ jobs:
             - CLI help (kinds cli-*) is `rpk connect` help: Usage is a
               one-line label with no terminal period, and Description is
               plain text, not AsciiDoc.
+            - CLI help text contains no backticks. urfave/cli takes the
+              first backtick span of a flag Usage as the --help value
+              placeholder and drops the backticks, and command help prints
+              backticks literally. Write code values bare; the generator puts
+              flags, snake_case names, paths and URLs in inline code. Never
+              suggest adding backticks; a string that has them is a finding.
+
+            OPERATOR FLAGS (surface operator): pflag usage strings of the
+            Redpanda Operator `run` command, published on the generated
+            operator flags reference next to a Default column that is
+            rendered from the flag itself.
+            - A usage string is capitalized, has no terminal period (the
+              page adds one when it renders the string as a paragraph), and
+              never echoes the flag name.
+            - Never restate the default ("Default 30m", "(default ...)").
+              The page renders it, and a restated one goes stale. Do
+              explain what a sentinel default means: 0, a negative
+              duration, or an empty string ("0 disables the PVCUnbinder").
+            - CLI help text contains no backticks, in usage and deprecation
+              strings alike. pflag takes the first backtick span of a usage
+              string as the flag's value placeholder: --help prints it after
+              the flag name and drops the backticks, so a bool flag can show
+              as "--metrics-secure false". Write code values bare (--namespace,
+              kube-system, 0, Pending, claimRef); the generator puts flags,
+              snake_case names, paths and URLs in inline code. Never suggest
+              adding backticks; a string that has them is a finding.
+            - A deprecated flag (kind deprecation) carries a MarkDeprecated
+              message that cobra prints after "Flag --x has been
+              deprecated,", so it stays a lowercase clause. It says what to
+              use instead, or that the flag has no effect and can be
+              removed. A usage that calls a flag deprecated when it is not
+              registered with MarkDeprecated is a finding: suggest the
+              MarkDeprecated call.
 
             REVIEW IN CONTEXT: judge each string as the reader of its page,
             not on its own. Read it together with its context entries and
@@ -1208,9 +1242,15 @@ jobs:
             comment is its own name and then a third-person description
             ("Returns a single fixture."); leave that form as it is.
             Every flag, command, path and URL goes in inline code.
-            In rpk strings write them bare, never in single or double
-            quotes: the generator formats them, and a Long is a Go raw
-            string that cannot hold a backtick. The rendered page builds its "Default:"
+            In rpk strings write them bare, never in backticks or in single
+            or double quotes: CLI help text contains no backticks. pflag takes
+            the first backtick span of a flag usage as the --help value
+            placeholder and drops the backticks, and cobra prints Short and
+            Long backticks literally (a Long is a Go raw string that cannot
+            hold one anyway). The generator puts flags, snake_case names,
+            paths and URLs in inline code. Never suggest adding backticks to
+            an rpk Short, Long or flag usage; a string that has them is a
+            finding. The rendered page builds its "Default:"
             row from structured data, so do not ask for a concrete default
             to be restated in prose; only a sentinel default (null, 0, -1,
             empty) needs its meaning explained. State only behavior the diff

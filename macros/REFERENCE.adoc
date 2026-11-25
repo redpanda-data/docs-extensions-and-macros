@@ -809,6 +809,67 @@ These never fail the build: `no-data` (no rpk data for the page) and `no-page` (
 
 Registered by the `prop` macro's extension (see <<rpkval>>).
 
+[[opflag]]
+== opflag and opflagval
+
+`opflag:` links a flag of the Redpanda Operator's `run` command to its entry on the generated flag reference (`reference:k-operator-flags.adoc`), and `opflagval:` renders one value of a flag. Both read the flag data that `doc-tools generate operator-flags` writes, so a flag name, type or default in prose cannot go stale or name a flag that does not exist.
+
+=== Usage
+
+[source,asciidoc]
+----
+Pass opflag:[--unbind-pvcs-after=60s] to enable the PVCUnbinder.
+The default of opflag:[--unbind-pvcs-after] is opflagval:[--unbind-pvcs-after], which disables it.
+----
+
+`opflag:[--flag]` renders the flag as written, including a value after `=`, and links its anchor on the reference page of the page's own component version. A value can hold commas, as in `opflag:[--additional-controllers=nodeWatcher,decommission]`. The leading dashes are optional, with or without a value: `opflag:[unbind-pvcs-after=60s]` renders `--unbind-pvcs-after=60s`. A global logging flag, such as `--log-level`, is accepted too.
+
+`opflagval:[--flag,field]` renders one field. The field defaults to `default`.
+
+[[opflagval-fields]]
+[cols="1,2,2"]
+|===
+| Field | Source in the flag data | Example
+
+| `default`
+| `default`, pflag's DefValue, as `--help` prints it. An empty string renders `""`
+| `0s`, `cluster.local`, `[]`
+
+| `type`
+| `type`, the pflag value type
+| `duration`, `bool`, `stringToString`
+
+| `description`
+| `usage`, the help text, rendered as AsciiDoc with every `--flag` in code, as the reference page renders it
+| "How long a broker Pod stays Pending before ..."
+
+| `deprecated`
+| Whether `deprecated` is set. `format=raw` gives `true` or `false`
+| `yes` or `no`
+|===
+
+=== Which data and page a call reads
+
+The data is `operator-flags-<version>.json` in the `reference` module's attachments, for the page's own release series: a page in `streaming` 26.2 reads the file for operator v26.2.x, and no other. Cloud and Agentic Data Plane pages never borrow it. With no data, `opflag:` renders plain code and `opflagval:` renders `<unknown FIELD>`, and the build warns once for the component version.
+
+The link target is `reference:k-operator-flags.adoc` in the same component version. Each flag's anchor is its name without dashes, such as `#unbind-pvcs-after`.
+
+=== Failures and validation modes
+
+The `operator-validate` attribute sets how problems are reported: `warn` (default), `error` (fail the build), or `off`.
+
+* An unknown flag warns with the nearest flag names and renders plain code.
+* A deprecated flag warns with its deprecation message. A deprecated flag, hidden or not, links its entry in the Deprecated flags section of the reference page. A hidden flag that is not deprecated warns and renders plain code, because the reference page leaves it out. Add `deprecated=ok` to a call that mentions one on purpose, such as a page that tells readers to remove it: `opflag:[--allow-pv-rebinding,deprecated=ok]`.
+* An unsupported field lists the supported ones.
+
+=== Checking prose with check-reference-values
+
+`doc-tools check-reference-values --kinds operator` checks `opflag:` and `opflagval:` calls, and the flags typed where the operator reads them: the items of an `additionalCmdFlags:` list in a YAML block, and `additionalCmdFlags={...}` or `additionalCmdFlags[n]=...` in a Helm `--set` argument. A flag the operator does not have is an error. A deprecated or hidden one is a warning, which `// value-check: ignore` above the block acknowledges. A bare `--flag` in a sentence is not checked, because rpk and the operator share flag-shaped names.
+
+=== Registration
+
+Registered by `macros/prop`, like every reference macro. It is also exported as `@redpanda-data/docs-extensions-and-macros/macros/opflag`.
+
 == connectval
 
 This inline macro renders one value of a Redpanda Connect component or config field from the published Connect data, formatted exactly as the generated component reference prints it.
@@ -1449,9 +1510,9 @@ Registered by the `prop` macro's extension (see <<rpkval>>).
 A field name a macro does not support is a warning (an error in `error` mode) that lists the fields it does. A test in this repository fails when this table and the macros disagree.
 
 [[value-fields-table]]
-[cols="2,3,1,2,2,2,1"]
+[cols="2,3,1,2,2,2,1,1"]
 |===
-| Field | Aliases | propval | rpkval | connectval | bloblval | metricval
+| Field | Aliases | propval | rpkval | connectval | bloblval | opflagval | metricval
 
 | `default`
 |
@@ -1459,6 +1520,7 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 | flag
 | field
 | parameter
+| yes
 |
 
 | `type`
@@ -1468,6 +1530,7 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 | field
 | parameter
 | yes
+| yes
 
 | `description`
 | `desc`
@@ -1475,6 +1538,7 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 | flag, command
 | field, component
 | function, method, parameter
+| yes
 | yes
 
 | `summary`
@@ -1484,12 +1548,14 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 | field, component
 |
 |
+|
 
 | `values`
 | `accepted-values`, `annotated_options`, `enum`, `options`
 | yes
 |
 | field
+|
 |
 | yes
 
@@ -1499,6 +1565,7 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 | flag, command
 | field, component
 | function, method
+|
 | yes
 
 | `deprecated`
@@ -1508,6 +1575,7 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 | field, component
 | function, method
 | yes
+| yes
 
 | `status`
 |
@@ -1515,6 +1583,7 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 |
 | component
 | function, method
+|
 | yes
 
 | `required`
@@ -1524,6 +1593,7 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 | field
 | parameter
 |
+|
 
 | `examples`
 | `example`
@@ -1532,12 +1602,14 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 | field
 | function, method
 |
+|
 
 | `advanced`
 | `is_advanced`
 |
 |
 | field
+|
 |
 |
 
@@ -1548,10 +1620,12 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 | field
 |
 |
+|
 
 | `enterprise`
 | `is_enterprise`
 | yes
+|
 |
 |
 |
@@ -1563,6 +1637,7 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 |
 | component
 | function, method
+|
 | yes
 
 | `aliases`
@@ -1572,10 +1647,12 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 |
 |
 |
+|
 
 | `see-also`
 | `seeAlso`, `see_also`
 | yes
+|
 |
 |
 |
@@ -1587,11 +1664,13 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 |
 |
 |
+|
 | yes
 
 | `unit`
 | `units`
 | yes
+|
 |
 |
 |
@@ -1604,10 +1683,12 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 |
 |
 |
+|
 
 | `max`
 | `maximum`
 | yes
+|
 |
 |
 |
@@ -1620,10 +1701,12 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 |
 |
 |
+|
 
 | `nullable`
 |
 | yes
+|
 |
 |
 |
@@ -1636,10 +1719,12 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 |
 |
 |
+|
 
 | `visibility`
 |
 | yes
+|
 |
 |
 |
@@ -1652,6 +1737,7 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 |
 |
 |
+|
 
 | `shorthand`
 | `short`
@@ -1660,11 +1746,13 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 |
 |
 |
+|
 
 | `usage`
 |
 |
 | command
+|
 |
 |
 | yes
@@ -1676,11 +1764,13 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 |
 |
 |
+|
 
 | `self-hosted-only`
 | `selfHostedOnly`
 |
 | command
+|
 |
 |
 |
@@ -1692,6 +1782,7 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 | field
 |
 |
+|
 
 | `impure`
 | `is_impure`
@@ -1700,8 +1791,10 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 |
 | function, method
 |
+|
 
 | `labels`
+|
 |
 |
 |
@@ -1715,9 +1808,11 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 |
 |
 |
+|
 | yes
 
 | `buckets`
+|
 |
 |
 |
@@ -1731,6 +1826,7 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 |
 |
 |
+|
 | yes
 
 | `requires`
@@ -1739,9 +1835,11 @@ A field name a macro does not support is a warning (an error in `error` mode) th
 |
 |
 |
+|
 | yes
 
 | `removed`
+|
 |
 |
 |

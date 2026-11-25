@@ -96,6 +96,7 @@
     "./macros/rpkval": "./macros/rpkval.js",
     "./macros/connectval": "./macros/connectval.js",
     "./macros/rpkcmd": "./macros/rpkcmd.js",
+    "./macros/opflag": "./macros/opflag.js",
     "./macros/metric": "./macros/metric.js",
     "./macros/metricval": "./macros/metricval.js",
     "./macros/connect": "./macros/connect.js",

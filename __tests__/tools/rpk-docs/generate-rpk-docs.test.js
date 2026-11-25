@@ -747,9 +747,10 @@ Specify a time range.`
     })
 
     test('does not wrap the rpk in a dotted config key', () => {
-      // rpk redpanda admin config print --host in the v26.1.12 tree
+      // rpk redpanda admin config print --host in the v26.1.12 tree. The
+      // key holds a snake_case segment, so the whole key is one code span.
       const result = formatDescription('An index into rpk.admin_api.addresses to select hosts, as with rpk.')
-      expect(result).toContain('into rpk.admin_api.addresses to')
+      expect(result).toContain('into `rpk.admin_api.addresses` to')
       expect(result).toContain('as with `rpk`.')
     })
 

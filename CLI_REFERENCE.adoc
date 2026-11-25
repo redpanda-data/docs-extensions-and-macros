@@ -659,7 +659,7 @@ doc-tools lint-strings [options]
 Path to an existing engineering checkout (for example, a local redpanda clone). Nothing is cloned. Required unless --list-rules is set.
 
 `--surface <list>`::
-Comma-separated surfaces to lint (default: all registered). Registered: properties, metrics, rpk, helm, crd, connect, api
+Comma-separated surfaces to lint (default: all registered). Registered: properties, metrics, rpk, helm, crd, connect, api, operator
 
 `--diff <base>`::
 Declaration-anchored diff mode: lint only declarations whose full span intersects lines changed in <base>...HEAD, and report a finding a rule can place on a source line only when that line changed
@@ -923,6 +923,11 @@ Generated from `doc-tools lint-strings --list-rules`. Each rule links the sectio
 |Code value or field name in prose without inline code
 |Without inline code, a property name, flag or path reads as ordinary prose, so readers cannot tell it is a value to type exactly. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
 
+|`cli-backtick`
+|error
+|CLI help text contains no backticks
+|CLI help text is printed in the terminal, not rendered. pflag (rpk, the Redpanda Operator) and urfave/cli (Redpanda Connect) take the first backtick span of a flag usage string as the flag's value placeholder: --help prints that text after the flag name and drops the backticks, so a bool flag can show as "--metrics-secure false", a value the flag does not take. Command help prints backticks literally. Write code values bare: the docs generators put flags, snake_case names, paths and URLs in inline code. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#rpk-commands-and-flags-transformed[Standard]
+
 |`rpk-short-multiline`
 |warning
 |Short must be a single line
@@ -1154,6 +1159,11 @@ Generated from `doc-tools lint-strings --list-rules`. Each rule links the sectio
 |xref:/glossterm:/config_ref: macro with unbalanced brackets
 |A macro with unbalanced brackets does not resolve, so the page shows the raw macro text instead of a link. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
 
+|`cli-backtick`
+|error
+|CLI help text contains no backticks
+|CLI help text is printed in the terminal, not rendered. pflag (rpk, the Redpanda Operator) and urfave/cli (Redpanda Connect) take the first backtick span of a flag usage string as the flag's value placeholder: --help prints that text after the flag name and drops the backticks, so a bool flag can show as "--metrics-secure false", a value the flag does not take. Command help prints backticks literally. Write code values bare: the docs generators put flags, snake_case names, paths and URLs in inline code. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#rpk-commands-and-flags-transformed[Standard]
+
 |`missing-field-description`
 |warning
 |Config field constructed with no .Description()
@@ -1275,6 +1285,83 @@ Generated from `doc-tools lint-strings --list-rules`. Each rule links the sectio
 |warning
 |Prose doc string too short to explain anything
 |A string this short cannot say what the field does, its unit, or what changes when you set it, so readers are left guessing. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|===
+
+.operator
+[cols="2,1,3,4",options="header"]
+|===
+|Rule |Severity |Checks |Why
+
+|`empty-description`
+|error
+|Declaration ships with no doc string at all
+|A declaration with no string publishes as a blank entry, so readers get a name and nothing about what it does. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#reviewing-a-diff-that-touches-these-strings[Standard]
+
+|`starts-lowercase`
+|warning
+|Description starts with a lowercase letter
+|Published strings are sentences in sentence case, so one that opens in lowercase reads as a fragment or a typo on the page. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`name-echo`
+|warning
+|Description merely restates the declared name (tautology)
+|A description that only restates the name tells readers nothing they could not already read from the name. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`unexpanded-jargon`
+|warning
+|Internal jargon that ships to users unexpanded
+|Internal terms such as NTP, seastar or nullopt mean nothing to the operators who read the reference page. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`em-dash`
+|warning
+|Em dash in prose that ships to docs.redpanda.com
+|The docs style avoids em dashes, and this string is published as written, so a fix made in the generated page is undone at the next regeneration. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/style-guide.md#formatting-conventions[Standard]
+
+|`latin-abbreviation`
+|warning
+|Latin abbreviation instead of plain English
+|The docs word list replaces e.g. and i.e. with plain English, and this string is published as written, so the abbreviation reaches the page. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/terminology.md#do-not-use-word-list[Standard]
+
+|`long-sentence`
+|warning
+|Sentence longer than 30 words
+|A sentence this long usually carries more than one idea, so readers have to read it twice to follow it. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`unbalanced-backticks`
+|error
+|Odd number of backticks ships broken markup
+|An odd number of backticks leaves an inline code span open, so the rest of the string renders as broken monospace. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`missing-inline-code`
+|warning
+|Code value or field name in prose without inline code
+|Without inline code, a property name, flag or path reads as ordinary prose, so readers cannot tell it is a value to type exactly. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`cli-backtick`
+|error
+|CLI help text contains no backticks
+|CLI help text is printed in the terminal, not rendered. pflag (rpk, the Redpanda Operator) and urfave/cli (Redpanda Connect) take the first backtick span of a flag usage string as the flag's value placeholder: --help prints that text after the flag name and drops the backticks, so a bool flag can show as "--metrics-secure false", a value the flag does not take. Command help prints backticks literally. Write code values bare: the docs generators put flags, snake_case names, paths and URLs in inline code. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#rpk-commands-and-flags-transformed[Standard]
+
+|`operator-terminal-period`
+|warning
+|Flag usage strings do not end with a period
+|Cobra prints the usage string in --help next to the flag and its default, where a closing period reads as clutter. The reference page renders the string as a paragraph and adds the period itself, so the source string never needs one. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#rpk-commands-and-flags-transformed[Standard]
+
+|`operator-restated-default`
+|warning
+|Flag usage restates the default the reference page already renders
+|The operator flags reference renders each default from the flag itself, so a default written into the usage string duplicates it and goes stale when the default changes. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`operator-unmarked-deprecation`
+|info
+|Flag usage says the flag is deprecated, but the flag is not marked deprecated
+|Only flags registered with MarkDeprecated are listed as deprecated on the reference page and warn when used, so a flag that is deprecated in prose only looks current to readers. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
+
+|`operator-deprecation-no-alternative`
+|info
+|Deprecation message does not say what to do instead
+|Readers who hit a deprecated flag need to know what replaces it or that they can remove it, and the deprecation message is the only place both the CLI warning and the reference page take that from. https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/embedded-reference-strings.md#the-quality-bar[Standard]
 
 |===
 
@@ -1664,10 +1751,10 @@ Root of the repo being scanned (antora.yml and modules/) (default: ".")
 Other component checkouts read into the same catalog, so data is selected exactly as the macros select it (for example ../docs ../rp-connect-docs)
 
 `--kinds <list>`::
-Comma-separated kinds to run: properties, rpk, connect (default: all; a named kind with no data is a setup error)
+Comma-separated kinds to run: properties, rpk, connect, operator (default: all; a named kind with no data is a setup error)
 
 `--data-file <path...>`::
-Dataset files that bypass selection, recognized by name: redpanda-properties-v<tag>.json, rpk-v<version>.json (the docs-data snapshot works), connect-<version>.json
+Dataset files that bypass selection, recognized by name: redpanda-properties-v<tag>.json, rpk-v<version>.json (the docs-data snapshot works), connect-<version>.json, operator-flags-v<version>.json
 
 `--files <path...>`::
 Scan only these files, relative to --docs-dir
@@ -1889,6 +1976,7 @@ display help for command
 * `cloud-regions` - Generate Markdown table of cloud regions and tiers from GitHub YAML file
 * `redpanda-release-notes` - Generate a Self-Managed release-notes section from an rpchangelog release body
 * `k8s-release-notes` - Generate release notes for the Redpanda Operator and Helm charts from a changelog release body
+* `operator-flags` - Generate the Redpanda Operator flag reference and its data from an operator release. Requires --tag, --branch or --source-dir.
 * `crd-spec` - Generate Asciidoc documentation for Kubernetes CRD references. Requires either --tag or --branch.
 * `bundle-openapi` - Bundle Redpanda OpenAPI fragments for admin and connect APIs. Requires either --tag or --branch.
 * `update-connect-version` - Update the Redpanda Connect version in antora.yml
@@ -2878,6 +2966,54 @@ npx doc-tools generate k8s-release-notes --lint --page modules/reference/pages/r
 - Fetching the release body from the private operator repository and running
   the curation step are wired by the docs-repo workflow, not here.
 - Phase 2 reads https://charts.redpanda.com/index.yaml.
+
+=== generate operator-flags
+
+Generates the Redpanda Operator flag reference (reference:k-operator-flags.adoc) and the operator-flags-<version>.json attachment that the opflag: and opflagval: macros read. Builds the operator's own `run` command at the given release with Go and walks every flag it registers, deprecated and hidden ones included, so types and defaults match the release.
+
+*Usage:*
+
+[,bash]
+----
+doc-tools generate operator-flags [options]
+----
+
+*Options:*
+
+`-t, --tag <operatorTag>`::
+Operator release tag, such as operator/v26.2.5
+
+`-b, --branch <branch>`::
+Operator branch for in-progress content (requires --operator-version)
+
+`--operator-version <version>`::
+The operator version the output is for, such as v26.3.1 (defaults to the tag)
+
+`--source-dir <dir>`::
+An existing redpanda-operator checkout to read instead of cloning. With --tag, the tag is recorded as the source ref
+
+`--docs-dir <dir>`::
+The docs checkout to write into (default: ".")
+
+`--data-only`::
+Write the JSON attachment only, not the reference page
+
+`-h, --help`::
+display help for command
+
+*Examples:*
+
+[,bash]
+----
+npx doc-tools generate operator-flags --tag operator/v26.2.5
+npx doc-tools generate operator-flags --tag operator/v26.3.1 --source-dir ../redpanda-operator
+npx doc-tools generate operator-flags --source-dir ../redpanda-operator --operator-version v26.3.1
+----
+
+*Requirements:*
+
+- Go toolchain
+- A GitHub token (REDPANDA_GITHUB_TOKEN, GITHUB_TOKEN or GH_TOKEN) to clone the private operator repository, unless --source-dir is given
 
 === generate crd-spec
 

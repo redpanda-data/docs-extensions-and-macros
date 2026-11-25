@@ -36,6 +36,8 @@ const rpkValues = require('../../extension-utils/rpk-values')
 const connectValues = require('../../extension-utils/connect-values')
 const { scanRpk } = require('./rpk')
 const { scanConnect } = require('./connect')
+const { scanOperator } = require('./operator')
+const operatorFlags = require('../../extension-utils/operator-flags')
 const connectLinks = require('./connect-links')
 const { makeRenderGuard } = require('./render-check')
 const shared = require('./shared')
@@ -43,9 +45,9 @@ const mentions = require('./mentions')
 const oldNames = require('./names')
 const { renderedPages } = require('./page-order')
 
-const KINDS = ['properties', 'rpk', 'connect']
+const KINDS = ['properties', 'rpk', 'connect', 'operator']
 const LEVELS = ['none', 'mismatch', 'any', 'links']
-const ALL_KINDS = [PROPERTIES_KIND, rpkValues.RPK_KIND, connectValues.CONNECT_KIND]
+const ALL_KINDS = [PROPERTIES_KIND, rpkValues.RPK_KIND, connectValues.CONNECT_KIND, operatorFlags.OPERATOR_FLAGS_KIND]
 const HISTORICAL_CONNECT_RX = /(?:^|\/)migration\//
 
 /**
@@ -58,12 +60,13 @@ const kindOfFile = (file) => {
   if (PROPERTIES_JSON_RX.test(base)) return { name: 'properties', kind: PROPERTIES_KIND, tag: base.match(PROPERTIES_JSON_RX)[1] }
   if (rpkValues.RPK_JSON_RX.test(base)) return { name: 'rpk', kind: rpkValues.RPK_KIND, tag: base.match(rpkValues.RPK_JSON_RX)[1] }
   if (connectValues.CONNECT_JSON_RX.test(base)) return { name: 'connect', kind: connectValues.CONNECT_KIND, tag: base.match(connectValues.CONNECT_JSON_RX)[1] }
+  if (operatorFlags.OPERATOR_FLAGS_JSON_RX.test(base)) return { name: 'operator', kind: operatorFlags.OPERATOR_FLAGS_KIND, tag: base.match(operatorFlags.OPERATOR_FLAGS_JSON_RX)[1] }
   return undefined
 }
 
 function readExplicit (file, own) {
   const found = kindOfFile(file)
-  if (!found) throw new SetupError(`--data-file ${file}: the name matches no dataset kind (redpanda-properties-v<tag>.json, rpk-v<version>.json, connect-<version>.json)`)
+  if (!found) throw new SetupError(`--data-file ${file}: the name matches no dataset kind (redpanda-properties-v<tag>.json, rpk-v<version>.json, connect-<version>.json, operator-flags-v<version>.json)`)
   let data
   try {
     data = JSON.parse(fs.readFileSync(file, 'utf8'))
@@ -421,6 +424,21 @@ function scanAll ({ docsDir, lenderDirs = [], dataFiles = [], kinds = KINDS, kin
     }
   }
 
+  if (kinds.includes('operator')) {
+    const given = explicit.operator && explicit.operator.registry
+    const registry = given || operatorFlags.loadOperatorFlagsFor(catalog, own.component, own.version)
+    if (!registry) skip('operator', `no operator flag data for ${where}: no operator-flags-<version>.json attachment selects for it; pass --data-file, or run doc-tools generate operator-flags`)
+    else {
+      const r = scanOperator({ docsDir, registry, files })
+      result.kinds.operator = {
+        dataset: given ? `${path.basename(given.explicit)} (--data-file)` : r.dataset,
+        selection: given ? 'explicit' : 'page',
+        surface: datasets.SURFACE_ALL,
+        ...r,
+      }
+    }
+  }
+
   if (!Object.keys(result.kinds).length) throw new SetupError(`no kind has data for ${where}: ${Object.entries(result.skipped).map(([k, v]) => `${k}: ${v}`).join('; ')}`)
   result.ignored = applyIgnores(result, docsDir)
   for (const [kind, r] of Object.entries(result.kinds)) {
@@ -438,7 +456,7 @@ function describe (kind, f) {
     if (f.status === 'mismatch') return `${f.property} ${f.field}: written ${f.written}, data ${f.dataValue}`
     return `${f.property} ${f.field}: ${f.status}${f.note ? ` (${f.note})` : ''}`
   }
-  const what = f.target || (kind === 'rpk' ? `${f.command || 'rpk'}${f.flag ? ` --${f.flag}` : ''}` : `${f.componentType || ''}/${f.component || ''}${f.fieldPath ? ` ${f.fieldPath}` : ''}`)
+  const what = f.target || (kind === 'operator' ? '' : kind === 'rpk' ? `${f.command || 'rpk'}${f.flag ? ` --${f.flag}` : ''}` : `${f.componentType || ''}/${f.component || ''}${f.fieldPath ? ` ${f.fieldPath}` : ''}`)
   if (f.status === 'reference' || f.status === oldNames.STATUS) return `${f.check === 'name' ? f.written : what}: ${f.reason}${f.note ? `: ${f.note}` : ''}${f.proposed ? `; ${f.applied ? 'applied' : f.writable ? '--write writes' : 'proposed'} ${f.proposed}` : ''}`
   if (f.status === mentions.STATUS) return `${f.written}: ${f.mention} with no link on the page${f.proposed ? `; ${f.proposed} links ${f.dataValue}` : ''}`
   if (f.status === 'example-output') return `${what}: comment says ${f.written}, data ${f.dataValue}`
@@ -487,7 +505,7 @@ function renderMarkdown (result) {
     if (refs.length) {
       out.push('| File:line | Severity | Reason | Where | Note |', '|---|---|---|---|---|')
       for (const f of [...errors, ...warnings]) {
-        const where = f.check === 'name' ? f.written : kind === 'rpk' ? `${f.command || ''}${f.token ? ` ${f.token}` : ''}` : `${f.componentType || ''}/${f.component || ''}${f.fieldPath ? ` ${f.fieldPath}` : ''}`
+        const where = f.check === 'name' ? f.written : kind === 'operator' ? f.written : kind === 'rpk' ? `${f.command || ''}${f.token ? ` ${f.token}` : ''}` : `${f.componentType || ''}/${f.component || ''}${f.fieldPath ? ` ${f.fieldPath}` : ''}`
         const proposal = f.proposed ? `; ${f.applied ? 'applied' : f.writable ? '--write writes' : 'proposed'} \`${f.proposed}\`` : ''
         out.push(`| ${mdEscape(`${f.file}:${f.line}`)} | ${f.severity} | ${f.reason} | ${mdEscape(where)} | ${mdEscape(`${f.note || ''}${proposal}`)} |`)
       }

@@ -1,6 +1,10 @@
 'use strict'
 
 const { STANDARD } = require('../standards')
+// The code-token patterns and the prose mask are shared with the
+// generators that format CLI help text (extension-utils/inline-code.js), so
+// the lint rule and the formatter always agree on what a code token is.
+const { CODE_TOKEN_PATTERNS, maskNonProse } = require('../../../extension-utils/inline-code')
 
 /**
  * Rules that apply to every doc-string surface.
@@ -55,65 +59,6 @@ function isNameEcho (name, description) {
   }
   return true
 }
-
-/**
- * Blank out the spans of a description where a code-ish token is expected to
- * appear bare, so the inline-code rule only sees prose:
- *
- *   * backticked spans - already marked up, which is the whole point;
- *   * URLs, Markdown link targets, and AsciiDoc macro targets and anchor
- *     ids - a path inside a link is part of the link, and backticking it
- *     would break the link;
- *   * anything the declaration is named after, which name-echo owns.
- *
- * Replaced with spaces rather than removed so match indices stay meaningful.
- */
-function maskNonProse (text) {
-  let out = text
-  const blank = (m) => ' '.repeat(m.length)
-  // Backticked spans first: a URL inside backticks is already marked up.
-  out = out.replace(/`[^`]*`/g, blank)
-  // Markdown links: mask the whole construct, target included.
-  out = out.replace(/\[[^\]]*\]\([^)]*\)/g, blank)
-  // Bare URLs, and AsciiDoc's url[text] form.
-  out = out.replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, blank)
-  // AsciiDoc macro targets and anchor ids: xref:components:processors/
-  // schema_registry_encode.adoc[...] names a page, <<avro_raw_json,...>>
-  // and [[field_paths]] name an anchor. Backticking either breaks the link.
-  // The label in brackets stays prose.
-  out = out.replace(/\b(?:xref|link|image|include|glossterm|config_ref|anchor):[^\s[]*(?=\[)/g, blank)
-  out = out.replace(/<<[^,>]*/g, blank)
-  out = out.replace(/\[\[[^\]]*\]\]|\[#[^\]]*\]/g, blank)
-  return out
-}
-
-/**
- * Tokens that are code and read as code, so they belong in inline code.
- * Backticks are the portable choice: a single-backtick span is inline code in
- * both AsciiDoc and Markdown, so one rule covers every surface regardless of
- * which format the generator emits.
- *
- * Deliberately narrow. This rule posts inline suggestions on engineering PRs,
- * so a false positive costs more than a miss:
- *
- *   * snake_case with at least two segments - in this domain that is always an
- *     identifier (`default_topic_partitions`), never prose;
- *   * long flags (`--tolerate-data-loss`);
- *   * absolute paths with at least two segments (`/etc/redpanda/redpanda.yaml`,
- *     `/v1/topics`).
- *
- * Not included, on purpose: dotted keys (`segment.bytes`) collide with
- * sentence boundaries and abbreviations; bare `true`/`false` and numbers
- * appear in ordinary prose; single-segment lowercase words are unrecoverable
- * from prose without a symbol table.
- */
-const CODE_TOKEN_PATTERNS = Object.freeze([
-  { id: 'identifier', re: /\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/g },
-  { id: 'flag', re: /(?<![\w-])--[a-z][a-z0-9]*(?:-[a-z0-9]+)*\b/g },
-  // A path may not end in a period, so "served from /v1/brokers." reports
-  // `/v1/brokers`, not the sentence's full stop with it.
-  { id: 'path', re: /(?<![\w/])\/[a-z][a-zA-Z0-9_.-]*(?:\/[a-zA-Z0-9_.{}-]*[a-zA-Z0-9_{}-])+\/?/g }
-])
 
 /**
  * Code-ish tokens in a description that are not inside inline code.
@@ -264,6 +209,44 @@ function findLongSentences (text, max = MAX_SENTENCE_WORDS) {
     }
   }
   return long
+}
+
+/**
+ * Declaration kinds that are CLI help text, per surface: printed in the
+ * terminal by cobra/pflag (rpk, operator) or urfave/cli (connect), so they
+ * hold no backticks (cli-backtick). rpk Long is a Go raw string and cannot
+ * hold a backtick unless it is concatenated in; it is covered all the same.
+ */
+const CLI_HELP_KINDS = Object.freeze({
+  rpk: ['short', 'long', 'flag'],
+  operator: ['flag', 'deprecation'],
+  connect: ['cli-flag', 'cli-usage', 'cli-usage-text', 'cli-description']
+})
+
+// Kinds whose first backtick span the CLI turns into a value placeholder.
+const PLACEHOLDER_KINDS = new Set(['flag', 'cli-flag'])
+
+const CLI_HELP_LABEL = {
+  short: 'Short',
+  long: 'Long',
+  flag: 'Flag usage',
+  deprecation: 'Deprecation message',
+  'cli-flag': 'Flag usage',
+  'cli-usage': 'Command Usage',
+  'cli-usage-text': 'Command UsageText',
+  'cli-description': 'Command Description'
+}
+
+/**
+ * The prose of a CLI help string, with indented lines blanked. In multi-line
+ * help (rpk Long, a command Description) an indented line is a code sample,
+ * which the generator publishes as a code block, so a backtick there is
+ * part of the code (a Go struct tag), not markup.
+ */
+function cliHelpProse (text, kind) {
+  const source = String(text || '')
+  if (PLACEHOLDER_KINDS.has(kind) || kind === 'short' || kind === 'deprecation') return source
+  return source.replace(/^(?:\t| {2,}).*$/gm, (line) => ' '.repeat(line.length))
 }
 
 const COMMON_RULES = [
@@ -471,4 +454,33 @@ const COMMON_RULES = [
   }
 ]
 
-module.exports = { COMMON_RULES, JARGON_TERMS, MAX_SENTENCE_WORDS, isNameEcho, tokenize, findBareCodeTokens, scanBareCodeTokens, findLongSentences, locateSentence, maskNonProse }
+/**
+ * CLI help text holds no backticks. Not in COMMON_RULES: the surfaces with
+ * CLI help (rpk, operator, connect) add it to their own rules, and it checks
+ * decl.meta.kind against CLI_HELP_KINDS.
+ */
+const CLI_BACKTICK_RULE = {
+  name: 'cli-backtick',
+  description: 'CLI help text contains no backticks',
+  why: 'CLI help text is printed in the terminal, not rendered. pflag (rpk, the Redpanda Operator) and urfave/cli (Redpanda Connect) take the first backtick span of a flag usage string as the flag\'s value placeholder: --help prints that text after the flag name and drops the backticks, so a bool flag can show as "--metrics-secure false", a value the flag does not take. Command help prints backticks literally. Write code values bare: the docs generators put flags, snake_case names, paths and URLs in inline code.',
+  standard: STANDARD.rpk,
+  severity: 'error',
+  check: (decl) => {
+    const kinds = CLI_HELP_KINDS[decl.surface]
+    if (!kinds || !decl.meta || !kinds.includes(decl.meta.kind)) return []
+    const text = cliHelpProse(decl.string, decl.meta.kind)
+    const at = offsetsOf(text, /`[^`\n]*`?/g)
+    if (at.length === 0) return []
+    const first = text.slice(at[0].index, at[0].index + at[0].length)
+    const what = CLI_HELP_LABEL[decl.meta.kind] || 'CLI help text'
+    const placeholder = PLACEHOLDER_KINDS.has(decl.meta.kind)
+      ? ' The CLI shows the first backtick span in --help as the flag\'s value placeholder.'
+      : ' The CLI prints backticks literally.'
+    return [{
+      message: `${what} contains a backtick (${first}).${placeholder} Remove every backtick and write the value bare; the docs generator formats flags, snake_case names, paths and URLs as code.`,
+      at
+    }]
+  }
+}
+
+module.exports = { COMMON_RULES, CLI_BACKTICK_RULE, CLI_HELP_KINDS, CODE_TOKEN_PATTERNS, JARGON_TERMS, MAX_SENTENCE_WORDS, isNameEcho, tokenize, findBareCodeTokens, scanBareCodeTokens, findLongSentences, locateSentence, maskNonProse }
