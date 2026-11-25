@@ -217,6 +217,13 @@ on:
 
 env:
   REVIEW_STATUS_CONTEXT: docs-review
+  # The model for best_fit_review and ticket_delta. Every other model job
+  # uses claude-skill's default (Opus 5). Replayed on the same 11 PRs
+  # (8 best-fit, 3 ticket-delta), Sonnet 5 cost 57% less than Opus 5 and
+  # found at least as many blockers that held up, and none that did not.
+  # The id works through claude-code-provider-adp: docs'
+  # upstream-doc-strings.yml calls it through the same provider.
+  LIGHT_REVIEW_MODEL: us.anthropic.claude-sonnet-5
   # The goal every review prompt opens with. One copy, so the reviews can't
   # drift apart on it.
   REVIEW_GOAL: >-
@@ -1476,6 +1483,7 @@ jobs:
           output_dir: review-output
           # Longer for large PRs (classify: large); see classify for why.
           timeout_minutes: ${{ needs.classify.outputs.review_minutes || '20' }}
+          gateway_model: ${{ env.LIGHT_REVIEW_MODEL }}
           prompt: >
             ${{ env.REVIEW_GOAL }}
             Review pull request ${{ inputs.pr_number }} in
@@ -1859,6 +1867,7 @@ jobs:
           output_dir: review-output
           # Longer for large PRs (classify: large); see classify for why.
           timeout_minutes: ${{ needs.classify.outputs.review_minutes || '20' }}
+          gateway_model: ${{ env.LIGHT_REVIEW_MODEL }}
           prompt: >
             ${{ env.REVIEW_GOAL }}
             Run ONLY stages 1–2 of /docs-team-standards:doc-ticket for
