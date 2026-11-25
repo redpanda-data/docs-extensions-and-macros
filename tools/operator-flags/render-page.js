@@ -68,7 +68,9 @@ function renderPage (data) {
   const global = globalFlags.filter(current).sort(byName)
   const deprecated = [...data.flags, ...globalFlags].filter((flag) => isOnPage(flag) && flag.deprecated).sort(byName)
   const out = [
-    generatedMarker('operator-flags', `the run command of redpanda-data/operator-enterprise at ${data.source && data.source.ref ? data.source.ref : version}`, 'To change a description, edit the flag\'s help text in operator/cmd/run/run.go.'),
+    // The marker is published in the page's Markdown twin, so it names the
+    // release and not the private repository or a path in it.
+    generatedMarker('operator-flags', `the run command of the Redpanda Operator at ${data.source && data.source.ref ? data.source.ref : version}`, 'To change a description, edit the flag\'s help text in the operator source.'),
     '= Redpanda Operator Flags',
     `:description: Command-line flags of the Redpanda Operator ${version}, with the type and default of each.`,
     '',

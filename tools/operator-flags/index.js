@@ -25,6 +25,7 @@ const { spawnSync } = require('child_process')
 const { renderPage } = require('./render-page')
 const { gitAuthEnv, redactCredentials } = require('../../cli-utils/git-credential-env')
 const { PAGE_MODULE, PAGE_RELATIVE } = require('../../extension-utils/operator-flags')
+const { PUBLIC_KEY_PREFIXES } = require('../k8s-release-notes/changie')
 
 const REPO = 'redpanda-data/operator-enterprise'
 const DUMP_PACKAGE = 'cmd/zz-doc-tools-flagdump'
@@ -117,14 +118,45 @@ function dumpFlags (checkout, { version, log = () => {} } = {}) {
   }
 }
 
+// An internal ticket key (K8S-843). A reader cannot open the ticket, so help
+// text is published without it. Keys that name a public standard (RFC-1123,
+// SHA-256) stay.
+const TICKET_KEY = '[A-Z][A-Z0-9]{1,9}-\\d+'
+const isInternalKey = (key) => !PUBLIC_KEY_PREFIXES.has(key.slice(0, key.lastIndexOf('-')))
+
+/**
+ * Remove internal ticket keys from a help string: a key in its own
+ * parentheses goes with them, and a key that ends a list goes with its comma.
+ *
+ * @returns {{text: string, removed: string[]}}
+ */
+function withoutTicketKeys (text) {
+  const removed = []
+  const drop = (keep) => (match, key) => {
+    if (!isInternalKey(key)) return match
+    removed.push(key)
+    return keep
+  }
+  const out = String(text || '')
+    .replace(new RegExp(`\\s*\\((${TICKET_KEY})\\)`, 'g'), drop(''))
+    .replace(new RegExp(`,\\s*(${TICKET_KEY})\\b`, 'g'), drop(''))
+    .replace(new RegExp(`\\s*\\b(${TICKET_KEY})\\b`, 'g'), drop(''))
+  return { text: out, removed }
+}
+
 /**
  * Build the published data from a dump.
  */
-function buildData (dump, { version, ref, now = new Date() }) {
+function buildData (dump, { version, ref, now = new Date(), log = () => {} }) {
+  const publish = (flag, text) => {
+    const { text: out, removed } = withoutTicketKeys(text)
+    if (removed.length) log(`--${flag.name}: left the internal ticket key ${removed.join(', ')} out of the help text. Remove it at the source too.`)
+    return out
+  }
   const clean = (flag) => {
-    const out = { name: flag.name, type: flag.type, default: flag.default, usage: flag.usage }
+    const out = { name: flag.name, type: flag.type, default: flag.default, usage: publish(flag, flag.usage) }
     if (flag.shorthand) out.shorthand = flag.shorthand
-    if (flag.deprecated) out.deprecated = flag.deprecated
+    if (flag.deprecated) out.deprecated = publish(flag, flag.deprecated)
     if (flag.hidden) out.hidden = true
     return out
   }
@@ -174,7 +206,7 @@ function generateOperatorFlags (opts = {}) {
   try {
     checkout = opts.sourceDir ? path.resolve(opts.sourceDir) : cloneOperator(ref, log)
     const dump = dumpFlags(checkout, { version, log })
-    const data = buildData(dump, { version, ref: ref || 'local checkout' })
+    const data = buildData(dump, { version, ref: ref || 'local checkout', log })
     const attachments = path.join(docsDir, 'modules', PAGE_MODULE, 'attachments')
     fs.mkdirSync(attachments, { recursive: true })
     const dataPath = path.join(attachments, `operator-flags-${version}.json`)
@@ -206,4 +238,4 @@ function generateOperatorFlags (opts = {}) {
   }
 }
 
-module.exports = { generateOperatorFlags, dumpFlags, buildData, versionOfRef, REPO }
+module.exports = { generateOperatorFlags, dumpFlags, buildData, withoutTicketKeys, versionOfRef, REPO }
