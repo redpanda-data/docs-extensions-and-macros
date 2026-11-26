@@ -66,9 +66,18 @@ function findTerms (text) {
     while ((m = GLOSSTERM_RX.exec(line))) {
       const target = m[1]
       const start = m.index + 'glossterm:'.length
+      // The macro's attributes: positional definition and customText, or
+      // named term=, definition=, customText= (as doc-tools check-metadata reads them).
+      const named = {}
+      const positional = []
+      for (const part of m[2].split(',').map((p) => p.trim()).filter(Boolean)) {
+        const eq = /^([A-Za-z][\w-]*)=(.*)$/.exec(part)
+        if (eq) named[eq[1]] = eq[2].replace(/^(['"])(.*)\1$/, '$2')
+        else positional.push(part)
+      }
       out.push({
-        target: target.trim(),
-        definition: m[2].split(',')[0].trim(),
+        target: (named.term || target).trim(),
+        definition: named.definition || positional[0] || '',
         line: lineNo,
         range: range(lineNo, m.index, m.index + m[0].length),
         targetRange: range(lineNo, start, start + target.length),

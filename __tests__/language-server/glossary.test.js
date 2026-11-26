@@ -93,6 +93,10 @@ describe('without a glossary', () => {
   })
 })
 
+test('findTerms reads named attributes like the macro', () => {
+  expect(glossary._findTerms('glossterm:w[customText=Widget] glossterm:x[term=broker] glossterm:g[definition=A part.]').map((g) => [g.target, g.definition])).toEqual([['w', ''], ['broker', ''], ['g', 'A part.']])
+})
+
 test('findTerms keeps spaces in targets, like the macro', () => {
   expect(glossary._findTerms('glossterm:Schema Registry[] and glossterm:x[def]').map((g) => [g.target, g.definition])).toEqual([['Schema Registry', ''], ['x', 'def']])
 })
