@@ -53,6 +53,24 @@ describe('aggregate-terms terms.json', () => {
     expect(glossary.contents.toString()).toMatch(/Also called: Bring Your Own Cloud\./)
   })
 
+  test('term headings get explicit IDs, and a category that collides with a term gets -terms', () => {
+    const listeners = {}
+    const context = { on (event, fn) { listeners[event] = fn; return context }, getLogger: () => ({ info () {}, warn () {}, error () {} }), setMaxListeners () {}, getMaxListeners () { return 10 } }
+    aggregateTerms.register.call(context, { config: { glossarypage: 'home:ROOT:glossary.adoc', publishjson: false } })
+    const siteCatalog = {}
+    const reg = { ...term('Schema Registry'), contents: Buffer.from('=== Schema Registry\n:term-name: Schema Registry\n:hover-text: SR.\n:category: Schema Registry\n\nBody.\n') }
+    const gw = { ...term('rpk.ai_gateway'), contents: Buffer.from('=== rpk.ai_gateway\n:term-name: rpk.ai_gateway\n:hover-text: GW.\n:category: Tools\n\nBody.\n') }
+    listeners.contentAggregated({ siteCatalog, contentAggregate: [{ name: 'shared', files: [reg, gw] }] })
+    const glossary = { src: {}, contents: Buffer.from('= Glossary\n') }
+    listeners.contentClassified({ siteCatalog, contentCatalog: { getComponents: () => [], resolvePage: (id) => (id === 'home:ROOT:glossary.adoc' ? glossary : undefined) } })
+    const html = require('@asciidoctor/core')().convert(glossary.contents.toString(), { attributes: { idprefix: '', idseparator: '-' } })
+    expect(html).toMatch(/<h2 id="schema-registry-terms">Schema Registry<\/h2>/)
+    expect(html).toMatch(/<h3 id="schema-registry">Schema Registry<\/h3>/)
+    // Asciidoctor alone would give rpk-ai_gateway; the explicit ID matches glossterm and terms.json.
+    expect(html).toMatch(/<h3 id="rpk-ai-gateway">rpk\.ai_gateway<\/h3>/)
+    expect(html).not.toMatch(/-2"/)
+  })
+
   test('publishJson: false turns publishing off', () => {
     expect(run({ publishjson: false }, [term('broker')])).toHaveLength(0)
   })

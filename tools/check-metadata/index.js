@@ -249,15 +249,28 @@ function checkGlossaryTerms ({ root, files, index, strict = false }) {
   const findings = []
   for (const file of files) {
     const lines = fs.readFileSync(path.resolve(root, file), 'utf8').split(/\r?\n/)
-    let inComment = false
+    // Comment, listing, and literal blocks: macros there never render (a
+    // [source,asciidoc] listing shows glossterm:x[] as an example).
+    let fence = null
     lines.forEach((line, i) => {
-      if (/^\/{4,}\s*$/.test(line)) { inComment = !inComment; return }
-      if (inComment || /^\/\/(?!\/)/.test(line)) return
+      const delimiter = /^(\/{4,}|-{4,}|\.{4,})\s*$/.exec(line)
+      if (fence) { if (delimiter && delimiter[1] === fence) fence = null; return }
+      if (delimiter) { fence = delimiter[1]; return }
+      if (/^\/\/(?!\/)/.test(line)) return
       GLOSSTERM_RE.lastIndex = 0
       let m
       while ((m = GLOSSTERM_RE.exec(line)) !== null) {
-        const target = m[1].trim()
-        const definition = m[2].split(',')[0].trim()
+        // The macro's attributes: positional definition and customText, or
+        // named term=, definition=, customText=.
+        const named = {}
+        const positional = []
+        for (const part of m[2].split(',').map((p) => p.trim()).filter(Boolean)) {
+          const eq = /^([A-Za-z][\w-]*)=(.*)$/.exec(part)
+          if (eq) named[eq[1]] = eq[2].replace(/^(['"])(.*)\1$/, '$2')
+          else positional.push(part)
+        }
+        const target = (named.term || m[1]).trim()
+        const definition = named.definition || positional[0] || ''
         if (definition || target.includes('{') || index.has(labelKey(target))) continue
         findings.push({
           file,

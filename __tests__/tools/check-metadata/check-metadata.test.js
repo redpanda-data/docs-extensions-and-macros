@@ -488,6 +488,26 @@ glossterm:blockcommented[]
     expect(code).toBe(0)
   })
 
+  test('skips listing and literal blocks, and reads named attributes like the macro', async () => {
+    const page = `= P
+:page-topic-type: concept
+
+[,asciidoc]
+----
+glossterm:example[]
+----
+
+....
+glossterm:literal[]
+....
+
+glossterm:widgetron[customText=Widget] and glossterm:x[term=broker] and glossterm:gizmo[definition=A part.]
+`
+    const root = makeRepo({ 'shared/modules/terms/partials/broker.adoc': TERM, 'modules/x/pages/p.adoc': page })
+    const { result } = await cli(['modules'], { root, taxonomy: TAXONOMY })
+    expect(result.findings.filter((f) => f.rule === 'unknown-glossary-term').map((f) => f.value)).toEqual(['widgetron'])
+  })
+
   test('is an error with --strict', async () => {
     const root = makeRepo({ 'shared/modules/terms/partials/broker.adoc': TERM, 'modules/x/pages/p.adoc': PAGE })
     const { code } = await cli(['modules'], { root, taxonomy: TAXONOMY, strict: true })

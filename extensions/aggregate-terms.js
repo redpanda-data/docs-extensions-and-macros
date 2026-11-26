@@ -7,7 +7,7 @@ const { raiseListenerLimit } = require('./util/raise-listener-limit')
 
 const fs = require('fs');
 const path = require('path');
-const { parseTermFile, validateTerms, toTermsJson, TERMS_COMPONENT, TERMS_JSON } = require('../extension-utils/glossary-terms');
+const { parseTermFile, validateTerms, toTermsJson, termAnchor, TERMS_COMPONENT, TERMS_JSON } = require('../extension-utils/glossary-terms');
 
 const TERMS_PATH = 'modules/terms/partials/';  // Default path within the 'shared' component
 
@@ -18,6 +18,12 @@ module.exports.register = function ({ config }) {
   /**
    * Function to process term content, extracting hover text and links.
    */
+  // The term's section title, the first non-empty line without its '=' marks.
+  function termTitle (termContent) {
+    const first = termContent.split('\n').map(l => l.trim()).find(l => l.length > 0) || ''
+    return first.replace(/^=+\s*/, '')
+  }
+
   function processTermContent(termContent) {
     const hoverTextMatch = termContent.match(/:hover-text: (.*)/);
     const hoverText = hoverTextMatch ? hoverTextMatch[1] : '';
@@ -162,10 +168,18 @@ module.exports.register = function ({ config }) {
     // Appends every term, by category, to a glossary page.
     function mergeTerms (glossaryPage) {
       let glossaryContent = glossaryPage.contents.toString('utf8');
+      // Every term heading gets an explicit ID, the anchor glossterm links and
+      // terms.json use. A category heading whose auto ID would be one of those
+      // (category Schema Registry, term Schema Registry) gets a -terms suffix,
+      // so the term keeps its anchor.
+      const termAnchors = new Set()
+      Object.values(siteCatalog.termsByCategory).forEach(list => list.forEach(t => termAnchors.add(termAnchor(termTitle(t.content)))))
       Object.keys(siteCatalog.termsByCategory).sort().forEach(category => {
-        let categoryContent = `\n\n== ${category}\n`;
+        const categoryId = termAnchor(category)
+        const categoryAttr = termAnchors.has(categoryId) ? `[#${categoryId}-terms]\n` : ''
+        let categoryContent = `\n\n${categoryAttr}== ${category}\n`;
         siteCatalog.termsByCategory[category].sort((a, b) => a.name.localeCompare(b.name)).forEach(term => {
-          categoryContent += `\n\n${processTermContent(term.content)}`;
+          categoryContent += `\n\n[#${termAnchor(termTitle(term.content))}]\n${processTermContent(term.content).replace(/^\s+/, '')}`;
         });
         glossaryContent += categoryContent;
       });

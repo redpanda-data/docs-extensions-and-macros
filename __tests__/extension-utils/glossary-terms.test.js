@@ -61,6 +61,20 @@ describe('validateTerms', () => {
   })
 })
 
+describe('validateTerms, cross-term checks', () => {
+  const parse = (name, extra, id) => parseTermFile(file(name, extra), { path: `p/${id || name}.adoc` })
+
+  test('a do-not-use form cannot be an alt label of another term', () => {
+    const errors = validateTerms([parse('broker', ':alt-labels: Server\n'), parse('worker', ':do-not-use: Server\n')])
+    expect(errors.join('\n')).toMatch(/do-not-use form 'Server' of 'worker'.*is an alt-label of another term, 'broker'/)
+  })
+
+  test('two terms cannot share a glossary anchor', () => {
+    const errors = validateTerms([parse('rpk ai', '', 'a'), parse('rpk-ai', '', 'b')])
+    expect(errors.join('\n')).toMatch(/both have the glossary anchor #rpk-ai/)
+  })
+})
+
 describe('indexTerms', () => {
   test('finds a term by its name or an alt label, ignoring case and spacing', () => {
     const broker = parseTermFile(file('broker', ':alt-labels: Redpanda  broker\n'), { path: 'p/broker.adoc' })

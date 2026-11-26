@@ -52,7 +52,12 @@ function splitLabels (value) {
   return String(value).split(',').map((s) => s.trim()).filter(Boolean)
 }
 
-/** The anchor the glossary page gives a term, from its section title. */
+/**
+ * The anchor a term has on the glossary page, from its section title.
+ * aggregate-terms writes it as the heading's explicit ID, so it holds even
+ * where Asciidoctor's own ID would differ (it keeps underscores) or collide
+ * (a category heading with the same title).
+ */
 function termAnchor (pageTitle) {
   return String(pageTitle || '').replace(/[[\]()]/g, '').toLowerCase().replace(ANCHOR_RX, '-')
 }
@@ -102,11 +107,18 @@ function validateTerms (terms) {
   const labels = new Map() // key -> { term, kind }
   const where = (t) => t.path || t.id
 
+  const anchors = new Map() // anchor -> term
   for (const t of terms) {
     const key = labelKey(t.term)
     if (names.has(key)) errors.push(`duplicate term-name '${t.term}' in ${where(t)} and ${where(names.get(key))}`)
     else names.set(key, t)
+    // Each term gets this ID on the glossary page, so two terms cannot share it.
+    if (t.anchor && anchors.has(t.anchor)) errors.push(`'${t.term}' (${where(t)}) and '${anchors.get(t.anchor).term}' (${where(anchors.get(t.anchor))}) both have the glossary anchor #${t.anchor}`)
+    else if (t.anchor) anchors.set(t.anchor, t)
   }
+  // Every term's alt labels, so a form one term avoids cannot be a label of another.
+  const altOwner = new Map()
+  for (const t of terms) for (const alt of t.altLabels) if (!altOwner.has(labelKey(alt))) altOwner.set(labelKey(alt), t)
   for (const t of terms) {
     const own = new Set([labelKey(t.term)])
     for (const alt of t.altLabels) {
@@ -127,6 +139,8 @@ function validateTerms (terms) {
       if (exactLabels.has(avoid)) errors.push(`'${avoid}' is both a label and a do-not-use form of '${t.term}' (${where(t)})`)
       const named = names.get(labelKey(avoid))
       if (named && named !== t) errors.push(`do-not-use form '${avoid}' of '${t.term}' (${where(t)}) is the name of another term, '${named.term}' (${where(named)})`)
+      const alt = altOwner.get(labelKey(avoid))
+      if (alt && alt !== t) errors.push(`do-not-use form '${avoid}' of '${t.term}' (${where(t)}) is an alt-label of another term, '${alt.term}' (${where(alt)})`)
     }
   }
   return errors
