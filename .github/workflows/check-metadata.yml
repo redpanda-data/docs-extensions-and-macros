@@ -4,7 +4,8 @@ name: Check page metadata
 # changes. It checks :page-categories: and the solution facet values against
 # the docs taxonomy (taxonomy.yml in redpanda-data/docs), with the same rules
 # the Antora build runs, and needs no model, so it belongs to the "tests, no
-# model" layer of the docs automation.
+# model" layer of the docs automation. It also warns on glossterm targets with
+# no glossary entry (rule unknown-glossary-term).
 #
 # Warn by default: Product Docs pages still carry deprecated categories until
 # they are rewritten, and a check that turns every PR red teaches people to

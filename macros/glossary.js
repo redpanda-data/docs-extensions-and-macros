@@ -4,6 +4,7 @@ const $glossaryContexts = Symbol('$glossaryContexts')
 const { posix: path } = require('path')
 const logger = require('@antora/logger')('glossary-macro')
 const { escapeHtml } = require('../extension-utils/html-utils')
+const { parseTermFile, labelKey } = require('../extension-utils/glossary-terms')
 
 // Backtick-monospace in hover-text. The unconstrained (double-backtick) form is
 // matched first, otherwise it leaves a stray delimiter on each side.
@@ -65,47 +66,34 @@ module.exports.register = function (registry, config = {}) {
     if (!glossaryContexts[sharedKey]) {
       // Get the term files from the 'shared' component
       const termFiles = contentCatalog.findBy({ component: 'shared', module: 'terms', family: 'partial' })
-      // Extract the term definitions from the files
-      const ATTRIBUTE_REGEX = /^:([a-zA-Z0-9_-]+):[ \t]*(.*)$/gm
-
+      // Parse the term files (extension-utils/glossary-terms.js, shared with
+      // aggregate-terms and doc-tools check-metadata).
       const termMap = new Map();
 
       const terms = termFiles.map(file => {
-        const content = file.contents.toString()
-        // Split content by lines and get the first non-empty line as the title
-        const lines = content.split('\n').map(line => line.trim())
-        const firstNonEmptyLine = lines.find(line => line.length > 0)
-        // Remove leading '=' characters (AsciiDoc syntax) and trim whitespace
-        const pageTitle = firstNonEmptyLine ? firstNonEmptyLine.replace(/^=+\s*/, '') : '#'
-        const attributes = {}
-
-        let match
-        while ((match = ATTRIBUTE_REGEX.exec(content)) !== null) {
-          const [ , name, value ] = match
-          attributes[name] = value
-        }
-
-        if (!attributes['term-name'] || !attributes['hover-text']) {
+        const parsed = parseTermFile(file.contents, { path: file.path })
+        if (!parsed) {
           logger.warn(`Skipping term ${file.path} due to missing 'term-name' and/or 'hover-text attributes'.`)
           return null
         }
 
-        if (termMap.has(attributes['term-name'])) {
-          throw new Error(`Error: Duplicate term-name '${attributes['term-name']}' found in ${file.src.fileUri || file.src.editUrl}.`);
+        if (termMap.has(parsed.term)) {
+          throw new Error(`Error: Duplicate term-name '${parsed.term}' found in ${file.src.fileUri || file.src.editUrl}.`);
         }
 
-        termMap.set(attributes['term-name'], true);
+        termMap.set(parsed.term, true);
 
         const termObject = {
-          term: attributes['term-name'],
-          def: attributes['hover-text'],
-          category: attributes['category'] || '',
-          pageTitle,
-          content
+          term: parsed.term,
+          def: parsed.def,
+          category: parsed.category,
+          altLabels: parsed.altLabels,
+          pageTitle: parsed.pageTitle,
+          content: parsed.content
         }
 
-        if (attributes['link'] && attributes['link'].trim() !== '') {
-          termObject.link = attributes['link']
+        if (parsed.link && parsed.link.trim() !== '') {
+          termObject.link = parsed.link
         }
 
         return termObject
@@ -136,6 +124,27 @@ module.exports.register = function (registry, config = {}) {
     return noBracketsTerm.toLowerCase().replace(IDRX, '-')
   }
 
+
+  // The term a glossterm target names: its term-name exactly, otherwise its
+  // term-name or one of its alt-labels, ignoring case.
+  function findTerm (gloss, target) {
+    const exact = gloss.find((candidate) => candidate.term === target)
+    if (exact) return exact
+    const key = labelKey(target)
+    return gloss.find((candidate) => labelKey(candidate.term) === key) ||
+      gloss.find((candidate) => (candidate.altLabels || []).some((alt) => labelKey(alt) === key))
+  }
+
+  const warned = new Set()
+  function warnUndefined (file, term) {
+    const where = file && file.src ? `${file.src.component}:${file.src.module}:${file.src.relative}` : ''
+    const key = `${where}|${term}`
+    if (warned.has(key)) return
+    warned.add(key)
+    const message = `glossterm:${term}[] has no glossary entry; add shared/modules/terms/partials/<term>.adoc or pass a definition`
+    if (file && file.src) logger.warn({ file: file.src }, message)
+    else logger.warn(message)
+  }
 
   const TRX = /(<[a-z]+)([^>]*>.*)/
 
@@ -169,13 +178,18 @@ module.exports.register = function (registry, config = {}) {
         // passed inline as glossterm:term[definition] has already been through
         // Asciidoctor's inline substitutions, so the two need different escaping.
         var definitionIsHtml = false;
-        const index = context.gloss.findIndex((candidate) => candidate.term === term)
-        if (index >= 0) {
-          definition = context.gloss[index].def
-          pageTitle = context.gloss[index].pageTitle
+        const found = findTerm(context.gloss, term)
+        if (found && !customLink && found.link) customLink = found.link
+        if (found) {
+          definition = found.def
+          pageTitle = found.pageTitle
         } else {
           definition = attributes.definition;
           definitionIsHtml = !!definition;
+          // A glossterm with no glossary entry and no inline definition
+          // renders as plain text with a "not yet defined" tooltip. Say so at
+          // build time, once per term per page, so the gap gets a term file.
+          if (!definition) warnUndefined(config.file, term)
         }
         if (definition) {
           logTerms && logger.info(`${term}:: ${definition}`)
@@ -195,7 +209,7 @@ module.exports.register = function (registry, config = {}) {
         const glossaryTermRole = document.getAttribute('glossary-term-role', 'glossary-term')
         const attrs = glossaryTermRole ? { role: glossaryTermRole } : {}
         var inline;
-        const termExistsInContext = context.gloss.some((candidate) => candidate.term === term);
+        const termExistsInContext = !!found;
         if ((termExistsInContext && links) || (links && customLink)) {
           inline = customLink
             ? self.createInline(parent, 'anchor', customText, { type: 'link', target: customLink, attributes: { ...attrs, window: '_blank', rel: 'noopener noreferrer' } })

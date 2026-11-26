@@ -41,6 +41,7 @@ const { loadTaxonomyFrom } = require('../../extension-utils/taxonomy')
 const { checkPageMetadata, isSolutionPage, CATEGORY_ATTRIBUTE, TOPIC_TYPE_ATTRIBUTE, SOLUTION_FACETS } = require('../../extension-utils/metadata-check')
 const { buildMatcher, suggestForPage, pageParts, DEFAULT_MIN_SCORE, DEFAULT_LIMIT } = require('../../extension-utils/metadata-suggest')
 const { loadTerminology, pageCandidates, aggregateCandidates } = require('../../extension-utils/metadata-candidates')
+const { loadTermsFromDir, termsFromJson, indexTerms, labelKey, PUBLIC_URL: TERMS_URL } = require('../../extension-utils/glossary-terms')
 
 const CHECKED_ATTRIBUTES = new Set([CATEGORY_ATTRIBUTE, TOPIC_TYPE_ATTRIBUTE, 'page-layout', ...Object.keys(SOLUTION_FACETS)])
 const LEGACY_CATEGORIES_PATH = 'shared/modules/ROOT/partials/valid-categories.yml'
@@ -204,6 +205,87 @@ function checkFiles ({ root, files, taxonomy, strict = false, isLegacyCategory }
     findings,
     summary: { errors, warnings: findings.length - errors },
   }
+}
+
+// glossterm:target[] and glossterm:target[custom text]; the macro's own regexp.
+const GLOSSTERM_RE = /glossterm:([^[\s][^[]*)\[(|.*?[^\\])\]/g
+
+/**
+ * The glossary to check glossterm targets against: --glossary (a partials
+ * directory or a terms.json path or URL), else the docs checkout or
+ * $REDPANDA_DOCS_PATH, else the published terms.json (only when `remote`: the
+ * CLI passes it when the taxonomy also came from the site). Null, with a note, when
+ * none can be read, so a repo without network still gets the taxonomy check.
+ *
+ * @returns {Promise<{source: string, index: Map}|{source: null, note: string}>}
+ */
+async function loadGlossaryFrom ({ source, root, remote = true, env = process.env, fetch: fetchImpl = globalThis.fetch } = {}) {
+  const fromDir = (dir) => ({ source: dir, index: indexTerms(loadTermsFromDir(dir)) })
+  const candidates = source ? [source] : [path.join(root, GLOSSARY_PATH), ...(env.REDPANDA_DOCS_PATH ? [path.join(path.resolve(env.REDPANDA_DOCS_PATH), GLOSSARY_PATH)] : []), ...(remote ? [TERMS_URL] : [])]
+  for (const c of candidates) {
+    try {
+      if (/^https?:\/\//i.test(c)) {
+        const res = await fetchImpl(c, { headers: { accept: 'application/json' } })
+        if (!res.ok) continue
+        return { source: c, index: indexTerms(termsFromJson(await res.json())) }
+      }
+      const resolved = path.resolve(root, c)
+      if (!fs.existsSync(resolved)) continue
+      if (fs.statSync(resolved).isDirectory()) return fromDir(resolved)
+      return { source: resolved, index: indexTerms(termsFromJson(JSON.parse(fs.readFileSync(resolved, 'utf8')))) }
+    } catch (_) {
+      // try the next source
+    }
+  }
+  return { source: null, note: `no glossary found (tried ${candidates.join(', ')}); glossterm targets were not checked` }
+}
+
+/**
+ * One warning per glossterm whose target is neither a term name nor an alt
+ * label in the glossary and that passes no inline definition. In a build these
+ * render as plain text with a "not yet defined" tooltip.
+ */
+function checkGlossaryTerms ({ root, files, index, strict = false }) {
+  const findings = []
+  for (const file of files) {
+    const lines = fs.readFileSync(path.resolve(root, file), 'utf8').split(/\r?\n/)
+    // Comment, listing, and literal blocks: macros there never render (a
+    // [source,asciidoc] listing shows glossterm:x[] as an example).
+    let fence = null
+    lines.forEach((line, i) => {
+      const delimiter = /^(\/{4,}|-{4,}|\.{4,})\s*$/.exec(line)
+      if (fence) { if (delimiter && delimiter[1] === fence) fence = null; return }
+      if (delimiter) { fence = delimiter[1]; return }
+      if (/^\/\/(?!\/)/.test(line)) return
+      GLOSSTERM_RE.lastIndex = 0
+      let m
+      while ((m = GLOSSTERM_RE.exec(line)) !== null) {
+        // The macro's attributes: positional definition and customText, or
+        // named term=, definition=, customText=.
+        const named = {}
+        const positional = []
+        for (const part of m[2].split(',').map((p) => p.trim()).filter(Boolean)) {
+          const eq = /^([A-Za-z][\w-]*)=(.*)$/.exec(part)
+          if (eq) named[eq[1]] = eq[2].replace(/^(['"])(.*)\1$/, '$2')
+          else positional.push(part)
+        }
+        const target = (named.term || m[1]).trim()
+        const definition = named.definition || positional[0] || ''
+        if (definition || target.includes('{') || index.has(labelKey(target))) continue
+        findings.push({
+          file,
+          line: i + 1,
+          attribute: 'glossterm',
+          value: target,
+          severity: strict ? 'error' : 'warning',
+          rule: 'unknown-glossary-term',
+          message: `glossterm:${target}[] has no glossary entry, so it renders as plain text with a "not yet defined" tooltip. Use an existing term or alt label, or add shared/modules/terms/partials/<term>.adoc in the docs repo.`,
+          kind: 'docs',
+        })
+      }
+    })
+  }
+  return findings
 }
 
 // The schemes a page-categories value may name once it is rewritten. A task
@@ -506,6 +588,18 @@ async function runCli (paths, options = {}, { fetch } = {}) {
     const fixes = options.fix ? fixFiles({ root, files, taxonomy: loaded.taxonomy }) : undefined
     result = checkFiles({ root, files, taxonomy: loaded.taxonomy, strict: Boolean(options.strict), isLegacyCategory: loadLegacyCategories(root) })
     result = { taxonomy: { source: loaded.source, schema: loaded.schemaSource, warnings: loaded.warnings }, ...result, ...(fixes ? { fixes } : {}) }
+    if (options.glossary !== false) {
+      const glossary = await loadGlossaryFrom({ source: typeof options.glossary === 'string' ? options.glossary : undefined, root, remote: /^https?:\/\//i.test(String(loaded.source)), ...(fetch ? { fetch } : {}) })
+      result.glossary = { source: glossary.source }
+      if (glossary.index) {
+        const termFindings = checkGlossaryTerms({ root, files, index: glossary.index, strict: Boolean(options.strict) })
+        result.findings = [...result.findings, ...termFindings].sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line || a.value.localeCompare(b.value))
+        const errors = result.findings.filter((f) => f.severity === 'error').length
+        result.summary = { errors, warnings: result.findings.length - errors }
+      } else {
+        result.taxonomy.warnings = [...(result.taxonomy.warnings || []), glossary.note]
+      }
+    }
     if (options.suggest) {
       result.suggest = suggestFiles({ root, files, taxonomy: loaded.taxonomy, minScore, limit, emptyOnly: Boolean(options.suggestEmptyOnly), terminology: resolveTerminology(root, splitList(options.terminology)) })
     }
@@ -534,6 +628,8 @@ module.exports = {
   loadLegacyCategories,
   makeIncludeReader,
   resolveTerminology,
+  loadGlossaryFrom,
+  checkGlossaryTerms,
   suggestFiles,
   runCli,
 }

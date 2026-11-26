@@ -1048,6 +1048,11 @@ This extension aggregates all term pages from the https://github.com/redpanda-da
 - Makes all `term-name`, `hover-text`, and `link` attributes available to the `glossterm` macro.
 - Looks for glossary pages named `reference:glossary.adoc` in all versions of all components and appends the contents of each term file to the glossary in alphabetical order.
 - If a glossary page is found, sets the `glossary-page` attribute of the `glossterm` macro to `reference:glossary.adoc` so that terms can be linked to the glossary page.
+- Validates the glossary as one data set and fails the build when it is ambiguous: two terms with the same `term-name`, an `alt-labels` value that is another term's name or names two terms, or a `do-not-use` form that is also a label of the same term (exact case; a form that differs only in case is a casing rule).
+- Lists each term's `alt-labels` on the glossary page, after its definition, as "Also called: ...".
+- Publishes the glossary as `terms.json` in the `shared` component's attachments (served at `/shared/_attachments/terms.json`, next to `taxonomy.yml`), for agents and tools. Each term has `id` (the file name), `term`, `definition` (the `hover-text`), `category`, `altLabels`, `doNotUse` (each `{form, useInstead}`, where `useInstead` is the label the form matches ignoring case, otherwise the term name), and `url` (its entry on the `glossarypage`). The parser is `extension-utils/glossary-terms.js`, shared with the `glossterm` macro and `doc-tools check-metadata`.
+
+Term files take two optional, comma-separated attributes besides `term-name`, `hover-text`, `category`, and `link`: `alt-labels` (other names readers use for the term) and `do-not-use` (forms the docs avoid).
 
 === Environment variables
 
@@ -1056,6 +1061,8 @@ This extension does not require any environment variables.
 === Configuration options
 
 The extension accepts the following configuration options:
+
+publishjson (optional):: Set to `false` to skip publishing `terms.json`. Defaults to `true`.
 
 termspath (optional):: Specifies the path to a local directory containing term files (in `.adoc` format). If this path is provided, the extension will attempt to load terms from this directory first. If this path is not provided or no valid terms are found in the specified directory, the extension will fall back to loading terms from the `shared` component.
 

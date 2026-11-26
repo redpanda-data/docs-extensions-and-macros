@@ -3737,6 +3737,15 @@ programCli
  * are under `suggest` in the JSON, apart from `findings`, and never change
  * the exit code, with --strict or without. The reusable check-metadata
  * workflow reports them as notices and in the job summary.
+ * Every changed file is also checked for glossterm targets with no glossary
+ * entry (rule unknown-glossary-term, a warning): a target must be a term's
+ * term-name or one of its alt-labels, ignoring case, unless the macro passes
+ * an inline definition. In a build such a target renders as plain text with a
+ * "not yet defined" tooltip. The glossary comes from --glossary (a term
+ * partials directory, or a terms.json path or URL), else
+ * shared/modules/terms/partials in the checkout or $REDPANDA_DOCS_PATH, else,
+ * when the taxonomy also came from the site, the published terms.json.
+ * --no-glossary skips this check.
  * --suggest also lists candidates: frequent, distinctive terms on a page that
  * no concept's label or altLabel matches, in any scheme, for proposing new
  * concepts or altLabels. They are repeated capitalized terms in prose (Amazon
@@ -3800,6 +3809,8 @@ programCli
   .option('--limit <n>', 'With --suggest, the most suggestions per facet and page (default: 3 on Product Docs pages, 6 on solution overviews; never past the facet cardinality)')
   .option('--suggest-empty-only', 'With --suggest, suggest only for pages without :page-categories:')
   .option('--candidates-only', 'List only candidate terms, frequent distinctive terms that no concept matches, aggregated across the pages with the pages each appears in')
+  .option('--glossary <path|url>', 'Glossary to check glossterm targets against: a term partials directory or a terms.json path or URL (default: shared/modules/terms/partials in the checkout or $REDPANDA_DOCS_PATH, then https://docs.redpanda.com/shared/_attachments/terms.json)')
+  .option('--no-glossary', 'Do not check glossterm targets')
   .option('--terminology <paths>', 'With --suggest or --candidates-only, comma-separated terminology lists whose terms are never candidates: a glossary partials directory, a Markdown word list, or a text file (default: the docs glossary, shared/modules/terms/partials, in the checkout or $REDPANDA_DOCS_PATH)')
   .action(async (paths, options) => {
     const { runCli } = require('../tools/check-metadata')
