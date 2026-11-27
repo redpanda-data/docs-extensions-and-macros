@@ -352,6 +352,64 @@ describe('concept rarity across solutions', () => {
   })
 })
 
+describe('doc-concepts.json: the scoring inputs, published for recommendations-diff', () => {
+  const recsIndex = require('../../extensions/solutions-catalog/recs-index')
+  const solutions = () => {
+    const list = [
+      resolved({ id: 'cdc-to-lakehouse', categoriesRaw: ['Iceberg', 'Tiered Storage'], useCases: ['Change data capture', 'Data lakehouse'], technologies: ['Redpanda Connect', 'Apache Iceberg', 'Postgres'], relatedDocKeys: new Set(['streaming:manage:tiered.adoc']) }),
+      resolved({ id: 'disaster-recovery', categoriesRaw: ['Data Replication', 'High Availability'], useCases: ['Disaster recovery'], technologies: ['rpk'], featured: true }),
+      resolved({ id: 'kafka-migration', categoriesRaw: ['Security', 'Schema Registry'], useCases: [], technologies: ['Redpanda Connect', 'Avro'] }),
+      resolved({ id: 'multiplayer-gaming', categoriesRaw: ['Schema Registry'], useCases: ['Schema management', 'Stream processing'], technologies: ['Redpanda Connect', 'Protobuf', 'Postgres'], platforms: ['kubernetes'] }),
+      resolved({ id: 'sports-data-fanout', categoriesRaw: ['Schema Registry'], useCases: ['Schema management'], technologies: ['Redpanda Connect', 'Avro', 'Postgres'], status: 'draft', draft: true }),
+    ]
+    list[0].relatedDocTwins = new Map([['cloud:manage:tiered.adoc', 'streaming:manage:tiered.adoc']])
+    list[0].relatedDocKeys.add('cloud:manage:tiered.adoc')
+    return list
+  }
+  const docs = [
+    doc('streaming:manage:tiered.adoc', ['Tiered Storage']),
+    doc('cloud:manage:tiered.adoc', ['Tiered Storage'], 'Redpanda Cloud'),
+    doc('streaming:manage:iceberg/specify-iceberg-schema.adoc', ['Iceberg Topics', 'Schema Registry', 'Schema management', 'Avro', 'Protobuf']),
+    doc('streaming:manage:dr.adoc', ['Data Replication', 'Disaster Recovery', 'rpk']),
+    doc('streaming:develop:cdc.adoc', ['Change data capture', 'PostgreSQL', 'Redpanda Connect'], 'Kubernetes'),
+    doc('streaming:develop:gaming.adoc', ['Stream processing', 'Schema management', 'Protobuf']),
+  ].map((d) => ({ ...d, title: d.key }))
+  const rels = [
+    { solutionId: 'kafka-migration', docKey: 'streaming:manage:dr.adoc', status: 'approved', confidence: 0.95, reason: 'Migrate, then fail over' },
+    { solutionId: 'multiplayer-gaming', docKey: 'streaming:develop:gaming.adoc', status: 'rejected', confidence: null, reason: 'Not a gaming page' },
+  ]
+  const settings = { maxRelated: 2, minScore: 0.6 }
+  const score = (input) => relationships.computeRelatedSolutions({ ...input, taxonomy, categoryMap: null, maxRelated: input.settings.maxRelated, minScore: input.settings.minScore })
+
+  test('scoring the published index gives the edges the build computed', () => {
+    const built = score({ docs, solutions: solutions(), relationships: rels, settings })
+    const json = JSON.parse(JSON.stringify(recsIndex.buildDocConceptsIndex({ docs, solutions: solutions(), relationships: rels, settings, siteUrl: 'https://docs.redpanda.com', generatedAt: 'now' })))
+    const read = recsIndex.readDocConceptsIndex(json)
+    const again = score(read)
+    const shape = (edges) => edges.map(({ doc, solution, provenance, score, shown, rank, reason, shared }) => ({ doc, solution, provenance, score, shown, rank, reason, shared }))
+    expect(shape(again.edges)).toEqual(shape(built.edges))
+    // The fixture exercises what the index must carry: rarity (5 solutions),
+    // an explicit edge and its Cloud twin, an approved and a rejected
+    // relationship, a draft, the platform filter, and max_related.
+    const provenances = new Set(built.edges.map((e) => e.provenance))
+    expect([...provenances].sort()).toEqual(['category', 'editor-approved', 'explicit', 'rejected'])
+    expect(built.edges.some((e) => e.shared && e.shared.rarity)).toBe(true)
+    expect(built.edges.some((e) => /hidden: Kubernetes page/.test(e.reason) || /hidden: rank 3 exceeds max_related 2/.test(e.reason))).toBe(true)
+  })
+
+  test('the index is plain JSON, with each concept set in the order the build derived it', () => {
+    const json = recsIndex.buildDocConceptsIndex({ docs, solutions: solutions(), relationships: rels, settings, generatedAt: 'now' })
+    expect(json).toMatchObject({ version: 1, settings: { maxRelated: 2, minScore: 0.6 } })
+    expect(json.docs.find((d) => d.id === 'streaming:manage:tiered.adoc')).toEqual({ id: 'streaming:manage:tiered.adoc', title: 'streaming:manage:tiered.adoc', url: '/streaming:manage:tiered.adoc/', deployment: '', concepts: { 'tiered-storage': 'direct' } })
+    const cdc = json.solutions.find((x) => x.id === 'cdc-to-lakehouse')
+    expect(cdc).toMatchObject({ relatedDocs: ['cloud:manage:tiered.adoc', 'streaming:manage:tiered.adoc'], relatedDocTwins: { 'cloud:manage:tiered.adoc': 'streaming:manage:tiered.adoc' }, platformIds: ['docker'] })
+    expect(cdc.concepts).toEqual({ 'iceberg-topics': 'direct', 'tiered-storage': 'direct', 'apache-iceberg': 'direct', 'change-data-capture': 'direct', 'data-lakehouse': 'direct', 'redpanda-connect': 'direct', postgresql: 'direct' })
+    const dr = json.docs.find((d) => d.id === 'streaming:manage:dr.adoc')
+    expect(dr.concepts['high-availability']).toBe('implied')
+    expect(() => recsIndex.readDocConceptsIndex({ docs: [] })).toThrow(/no docs and solutions lists/)
+  })
+})
+
 describe('catalog output', () => {
   test('each solution lists its concepts next to the authored values', () => {
     const r = resolved({ industries: ['iGaming'] })
