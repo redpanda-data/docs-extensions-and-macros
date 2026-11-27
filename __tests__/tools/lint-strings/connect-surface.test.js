@@ -183,3 +183,94 @@ func init() {
     }
   })
 })
+
+describe('connect-short-description-markup', () => {
+  // Each field carries the same text in Description and ShortDescription,
+  // so the rule must tell the two apart.
+  const cases = {
+    plain: 'The storage account to access.',
+    backticks: 'The `storage account` to access.',
+    xref: 'See xref:components:inputs/kafka.adoc[kafka] for details.',
+    link: 'See link:https://example.com[the guide] for details.',
+    url_link: 'See https://example.com[the guide] for details.',
+    pass: 'Accepts pass:[*] as a wildcard.',
+    anchor: 'See <<retries>> for details.',
+    bold_double: 'This is **required** for TLS.',
+    bold: 'This is *required* for TLS.',
+    italic: 'This is _required_ for TLS.',
+    attribute: 'Available in {product-name} only.',
+    // The single-line form, which the conditional rule flags in a Description.
+    conditional: 'ifdef::env-cloud[Only in Cloud.]',
+    identifier: 'Sets max_in_flight and the *.json glob, or 2 * 3 batches.'
+  }
+  const go = [
+    'package fixture',
+    '',
+    'import "github.com/redpanda-data/benthos/v4/public/service"',
+    '',
+    'func init() {',
+    '\tservice.NewConfigSpec().Fields(',
+    ...Object.entries(cases).map(([name, text]) =>
+      `\t\tservice.NewStringField("${name}").Description(${JSON.stringify(text)}).ShortDescription(${JSON.stringify(text)}),`),
+    '\t)',
+    '}',
+    ''
+  ].join('\n')
+  const declarations = connect.scanFile(go, 'internal/impl/fixture/short.go')
+  // Findings do not carry meta.kind, so lint one declaration at a time.
+  const rules = (kind, name) => runRules(
+    declarations.filter((d) => d.meta.kind === kind && d.name === name),
+    rulesFor(connect)
+  ).findings.flatMap((f) => f.rules)
+  const short = (name) => rules('field-short', name).filter((r) => r.id === 'connect-short-description-markup')
+
+  test('every ShortDescription is extracted', () => {
+    for (const name of Object.keys(cases)) {
+      expect(declarations.find((d) => d.meta.kind === 'field-short' && d.name === name)).toBeDefined()
+    }
+  })
+
+  test.each([
+    ['backticks', 'backticks'],
+    ['xref', 'an AsciiDoc macro'],
+    ['link', 'an AsciiDoc macro'],
+    ['url_link', 'an AsciiDoc link'],
+    ['pass', 'an AsciiDoc passthrough'],
+    ['anchor', 'a cross-reference'],
+    ['bold_double', 'bold markup'],
+    ['bold', 'bold markup'],
+    ['italic', 'italic markup'],
+    ['attribute', 'an attribute reference'],
+    ['conditional', 'an AsciiDoc conditional']
+  ])('flags %s in a ShortDescription as an error', (name, what) => {
+    const issues = short(name)
+    expect(issues).toHaveLength(1)
+    expect(issues[0].severity).toBe('error')
+    expect(issues[0].message).toContain(what)
+    expect(issues[0].message).toContain('ShortDescription is plain text shown as inline help in form-based config editors')
+    expect(issues[0].message).toContain('move the formatting to Description()')
+  })
+
+  test('plain text, identifiers, globs and arithmetic are not markup', () => {
+    expect(short('plain')).toEqual([])
+    expect(short('identifier')).toEqual([])
+  })
+
+  test('the same markup in Description is fine', () => {
+    for (const name of Object.keys(cases)) {
+      expect(rules('field', name).map((r) => r.id)).not.toContain('connect-short-description-markup')
+    }
+  })
+
+  test('missing-inline-code never asks for backticks in a ShortDescription', () => {
+    // max_in_flight is a bare identifier: Description is asked to wrap it,
+    // ShortDescription is not, or the two rules would contradict each other.
+    expect(rules('field', 'identifier').map((r) => r.id)).toContain('missing-inline-code')
+    expect(rules('field-short', 'identifier').map((r) => r.id)).not.toContain('missing-inline-code')
+  })
+
+  test('a conditional in a ShortDescription is reported as markup, not as an env-cloud block to fix', () => {
+    expect(rules('field', 'conditional').map((r) => r.id)).toContain('conditional')
+    expect(rules('field-short', 'conditional').map((r) => r.id)).not.toContain('conditional')
+  })
+})

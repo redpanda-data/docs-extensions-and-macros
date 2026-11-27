@@ -9,10 +9,10 @@ const FIXTURES = path.join(__dirname, '..', 'fixtures', 'taxonomy')
 const VALID = yaml.load(fs.readFileSync(path.join(FIXTURES, 'valid-categories.yml'), 'utf8'))['page-valid-categories']
 const TAXONOMY = parseTaxonomy(fs.readFileSync(path.join(FIXTURES, 'taxonomy.yml')))
 
-function page (categories, { component = 'streaming', relative = `${categories.replace(/\W+/g, '-')}.adoc` } = {}) {
+function page (categories, { component = 'streaming', relative = `${categories.replace(/\W+/g, '-')}.adoc`, attributes = {} } = {}) {
   return {
     src: { component, relative },
-    asciidoc: { attributes: { 'page-categories': categories, 'page-relative-src-path': relative } },
+    asciidoc: { attributes: { 'page-categories': categories, 'page-relative-src-path': relative, ...attributes } },
   }
 }
 
@@ -67,6 +67,23 @@ describe('validate-attributes with the taxonomy', () => {
     const lines = await run([p])
     expect(p.asciidoc.attributes['page-categories']).toBe('Security, Management')
     expect(lines.warn).toEqual([])
+  })
+
+  // EOL branches are never edited, so their pages keep deprecated values.
+  test('deprecated values on end-of-life pages are logged at debug, not warned', async () => {
+    const pages = [
+      page('Iceberg', { relative: 'eol.adoc', attributes: { 'page-is-past-eol': 'true' } }),
+      page('Management', { relative: 'eol-dated.adoc', attributes: { 'page-release-date': '2024-04-30' } }),
+      page('Integration', { relative: 'supported.adoc', attributes: { 'page-is-past-eol': 'false', 'page-release-date': '2999-01-01' } }),
+    ]
+    const lines = await run(pages)
+    expect(lines.warn).toEqual([
+      "page-categories value 'Integration' is deprecated; no single value replaces it; see its definition in taxonomy.yml and choose per page (1 page): streaming:supported.adoc",
+    ])
+    expect(lines.debug).toEqual(expect.arrayContaining([
+      "page-categories value 'Iceberg' is deprecated; use 'Iceberg Topics' instead (1 page): streaming:eol.adoc [end-of-life versions]",
+      "page-categories value 'Management' is deprecated; use 'Operate' instead (1 page): streaming:eol-dated.adoc [end-of-life versions]",
+    ]))
   })
 
   test('deprecated values warn once per value, not once per page', async () => {

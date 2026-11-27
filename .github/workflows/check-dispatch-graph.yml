@@ -34,8 +34,8 @@ jobs:
     name: Check the dispatch graph
     runs-on: ubuntu-latest
     steps:
-      # The bot token is what makes the check possible at all: eight of the
-      # sixteen repos are private, and github.token cannot read workflow
+      # The bot token is what makes the check possible at all: nine of the
+      # seventeen repos are private, and github.token cannot read workflow
       # files or Actions runs outside this repo. Fetched only on the default
       # branch, same boundary as kapa-source-groups-drift.yml: workflow_dispatch
       # can be aimed at any branch a user with write access selects, and

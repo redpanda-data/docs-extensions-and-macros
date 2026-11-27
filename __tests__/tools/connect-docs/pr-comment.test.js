@@ -77,3 +77,28 @@ describe('connect-docs-check PR comment', () => {
     expect(() => runCli(['--diff', 'x.json'])).toThrow('--build must be pass or fail')
   })
 })
+
+describe('connect-docs-check PR comment: broken links', () => {
+  test('lists broken links the PR adds without changing notify', () => {
+    const brokenLinks = [{ url: 'https://dead.test/x', locations: [{ file: 'a.go', line: 3 }] }]
+    const { body, notify } = buildComment({ build: 'pass', diff: diff(0), brokenLinks })
+    expect(notify).toBe(false)
+    expect(body).toContain('1 link this PR adds returns 404 or 410')
+    expect(body).toContain('- https://dead.test/x (a.go:3)')
+    expect(buildComment({ build: 'pass', diff: diff(0) }).body).not.toContain('404 or 410')
+  })
+
+  test('reads --link-check from the CLI', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cdc-lc-'))
+    const file = path.join(dir, 'link-check.json')
+    fs.writeFileSync(file, JSON.stringify({ broken: [{ url: 'https://dead.test/y', locations: [{ file: 'b.go', line: 9 }] }] }))
+    const out = path.join(dir, 'comment.md')
+    const write = jest.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    try {
+      runCli(['--build', 'pass', '--link-check', file, '--output', out])
+    } finally {
+      write.mockRestore()
+    }
+    expect(fs.readFileSync(out, 'utf8')).toContain('- https://dead.test/y (b.go:9)')
+  })
+})

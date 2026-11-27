@@ -278,6 +278,20 @@ describe('algolia-indexer generate-index (Solutions records)', () => {
     expect(record.keywords).toEqual(['leaderboard', 'Event-driven microservices', 'Gaming'])
   })
 
+  test('the Take it to production page is not indexed as a second overview', () => {
+    const attrs = stepAttrs({ 'page-layout': 'solution-production' })
+    delete attrs['page-solution-step-id']
+    const [record] = runSolutions(solutionPage({
+      url: '/solutions/leaderboard/take-to-production/',
+      relative: 'take-to-production.adoc',
+      attrs,
+      html: stepHtml('Take it to production')
+    }))
+    expect(record.solutionId).toBe('leaderboard')
+    expect(record.stepId).toBe('take-to-production')
+    expect(record.useCases).toBeUndefined()
+  })
+
   test('step records do not repeat the solution facets', () => {
     const [record] = runSolutions(solutionPage({
       url: '/solutions/leaderboard/start-environment/',
@@ -370,5 +384,54 @@ describe('algolia-indexer taxonomy facets', () => {
     const record = indexWith(page, labs, { taxonomy })
     expect(record.deployment).toBe('Docker')
     expect(record).not.toHaveProperty('topics')
+  })
+})
+
+describe('algolia-indexer pages without an article', () => {
+  function indexLogged (page) {
+    const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() }
+    const result = generateIndex(
+      { site: { url: 'https://docs.redpanda.com' } },
+      {
+        getPages: (fn) => [page].filter((p) => fn(p) !== undefined),
+        getComponent: () => component,
+        getComponentVersion: () => component.latest,
+        getComponents: () => [component],
+      },
+      { logger }
+    )
+    const records = (result[component.name] || {})[page.src.version] || []
+    return { logger, records }
+  }
+
+  // The live Bloblang Playground has an inline script inside its article
+  // whose comment mentions connect-<version>.json. Parsed as HTML, that
+  // unclosed <version> tag broke the tree and article.doc was not found.
+  test('finds the article when an inline script in it looks like an unclosed tag', () => {
+    const html = '<html><body><div class="body"><main><div class="content">' +
+      '<article class="doc"><h1>Bloblang Playground</h1>' +
+      '<script>// only the newest connect-<version>.json is hosted</script>' +
+      '<div class="paragraph"><p>Try a mapping.</p></div></article>' +
+      '</div></main></div></body></html>'
+    const { logger, records } = indexLogged(makePage(html))
+    expect(logger.warn).not.toHaveBeenCalled()
+    expect(records).toHaveLength(1)
+    expect(records[0].title).toBe('Bloblang Playground')
+  })
+
+  test.each(['search', 'labs-home'])('skips a page on the %s layout quietly', (layout) => {
+    const page = makePage('<html><body><div class="search-page"></div></body></html>', {
+      asciidoc: { attributes: { 'page-layout': layout } },
+    })
+    const { logger, records } = indexLogged(page)
+    expect(records).toEqual([])
+    expect(logger.warn).not.toHaveBeenCalled()
+    expect(logger.debug).toHaveBeenCalledWith(expect.stringContaining(`${layout} layout`))
+  })
+
+  test.each([[{}], [{ 'page-layout': 'default' }]])('warns for a default-layout page with no article (%o)', (attributes) => {
+    const page = makePage('<html><body><div>No article</div></body></html>', { asciidoc: { attributes } })
+    const { logger } = indexLogged(page)
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Page is not an article...skipping'))
   })
 })

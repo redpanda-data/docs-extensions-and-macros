@@ -137,31 +137,102 @@ describe('clusterSectionByArea', () => {
     'Security:: Theta.', '',
   ].join('\n');
 
+  // Each area once per category, its entries as bullets, areas alphabetical.
   const clustered = [
     '== v26.2.9 (2026-11-01)', '',
     '=== Bug fixes', '',
-    'Cloud Topics:: Delta.', '',
-    'Kafka API:: Beta.', '',
-    'Kafka API:: Epsilon.', '',
-    'Security:: Alpha.', '',
-    'Security:: Gamma.', '',
+    'Cloud Topics::', '* Delta.', '',
+    'Kafka API::', '* Beta.', '* Epsilon.', '',
+    'Security::', '* Alpha.', '* Gamma.', '',
     '=== Improvements', '',
-    'rpk:: Zeta.', '',
-    'Security:: Theta.', '',
+    'rpk::', '* Zeta.', '',
+    'Security::', '* Theta.', '',
   ].join('\n');
 
-  it('clusters same-area entries alphabetically by area, stable within an area', () => {
+  it('groups same-area entries under one label, areas alphabetical, stable within an area', () => {
     expect(clusterSectionByArea(scattered)).toBe(clustered);
   });
 
-  it('is idempotent: clustering a clustered section changes nothing', () => {
+  it('is idempotent: grouping a grouped section changes nothing', () => {
     expect(clusterSectionByArea(clustered)).toBe(clustered);
+  });
+
+  it('gives an area with one entry a one-item list', () => {
+    const out = clusterSectionByArea('== v26.2.9 (2026-11-01)\n\n=== Bug fixes\n\nStorage:: Only.\n');
+    expect(out).toBe('== v26.2.9 (2026-11-01)\n\n=== Bug fixes\n\nStorage::\n* Only.\n');
+  });
+
+  it('accepts a category that mixes grouped areas and single-line entries, merging one area', () => {
+    const mixed = [
+      '== v26.2.9 (2026-11-01)', '',
+      '=== Bug fixes', '',
+      'Security::', '* Alpha.', '',
+      'Kafka API:: Beta.', '',
+      'Security:: Gamma.', '',
+    ].join('\n');
+    const expected = [
+      '== v26.2.9 (2026-11-01)', '',
+      '=== Bug fixes', '',
+      'Kafka API::', '* Beta.', '',
+      'Security::', '* Alpha.', '* Gamma.', '',
+    ].join('\n');
+    expect(clusterSectionByArea(mixed)).toBe(expected);
+  });
+
+  it('groups single-line entries written on adjacent lines, with no blank line between them', () => {
+    const adjacent = [
+      '== v26.2.9 (2026-11-01)', '',
+      '=== Bug fixes', '',
+      'Security:: Alpha.',
+      'Kafka API:: Beta.',
+      'Security:: Gamma.', '',
+    ].join('\n');
+    const expected = [
+      '== v26.2.9 (2026-11-01)', '',
+      '=== Bug fixes', '',
+      'Kafka API::', '* Beta.', '',
+      'Security::', '* Alpha.', '* Gamma.', '',
+    ].join('\n');
+    expect(clusterSectionByArea(adjacent)).toBe(expected);
+  });
+
+  it('keeps a grouped area with its bullets when single-line entries sit next to it', () => {
+    const tight = [
+      '== v26.2.9 (2026-11-01)', '',
+      '=== Bug fixes', '',
+      'Security::', '* Alpha.', '',
+      'Kafka API:: Beta.', '',
+    ].join('\n');
+    const expected = [
+      '== v26.2.9 (2026-11-01)', '',
+      '=== Bug fixes', '',
+      'Kafka API::', '* Beta.', '',
+      'Security::', '* Alpha.', '',
+    ].join('\n');
+    expect(clusterSectionByArea(tight)).toBe(expected);
+  });
+
+  it('groups a section file with CRLF line endings, and writes LF', () => {
+    const crlf = [
+      '== v26.2.9 (2026-11-01)', '',
+      '=== Bug fixes', '',
+      'Security::', '* Alpha.', '',
+      'Kafka API:: Beta.', '',
+    ].join('\r\n');
+    const expected = [
+      '== v26.2.9 (2026-11-01)', '',
+      '=== Bug fixes', '',
+      'Kafka API::', '* Beta.', '',
+      'Security::', '* Alpha.', '',
+    ].join('\n');
+    expect(clusterSectionByArea(crlf)).toBe(expected);
   });
 
   it('does not move entries across a category boundary', () => {
     // The Bug fixes "Security" entries do not absorb the Improvements "Security".
     const out = clusterSectionByArea(scattered);
-    expect(out.indexOf('Security:: Theta.')).toBeGreaterThan(out.indexOf('=== Improvements'));
+    expect(out.indexOf('* Theta.')).toBeGreaterThan(out.indexOf('=== Improvements'));
+    expect(out.match(/^Security::$/gm)).toHaveLength(2); // once per category
   });
 
   it('leaves a category of plain bullets (a phase-1 candidate) untouched', () => {
@@ -223,9 +294,8 @@ describe('clusterSectionByArea', () => {
     const expected = [
       '== v26.2.9 (2026-11-01)', '',
       '=== Bug fixes', '',
-      'Kafka API:: One.', '',
-      'Kafka API :: Three.', '', // grouped with Kafka API; text left verbatim
-      'Security:: Two.', '',
+      'Kafka API::', '* One.', '* Three.', '', // one area, written as the trimmed label
+      'Security::', '* Two.', '',
     ].join('\n');
     expect(clusterSectionByArea(spaced)).toBe(expected);
   });
@@ -245,6 +315,23 @@ describe('clusterSectionByArea', () => {
       expect(clusterSectionByArea(multiLine)).toBe(multiLine); // left unclustered
       expect(warn).toHaveBeenCalledTimes(1);
       expect(warn.mock.calls[0][0]).toMatch(/\[release-notes\] WARN: "Bug fixes" not grouped by area/);
+    });
+
+    it('warns and leaves the category as it is when a grouped area has a wrapped item', () => {
+      const wrapped = [
+        '== v26.2.9 (2026-11-01)', '',
+        '=== Bug fixes', '',
+        'Security::', '* One that wraps', 'onto a second line.', '',
+        'Kafka API:: Two.', '',
+      ].join('\n');
+      expect(clusterSectionByArea(wrapped)).toBe(wrapped);
+      expect(warn).toHaveBeenCalledTimes(1);
+    });
+
+    it('warns and leaves the category as it is when an area term has no items', () => {
+      const bare = '== v26.2.9 (2026-11-01)\n\n=== Bug fixes\n\nSecurity::\n\nKafka API:: Two.\n';
+      expect(clusterSectionByArea(bare)).toBe(bare);
+      expect(warn).toHaveBeenCalledTimes(1);
     });
 
     it('stays silent when a phase-1 bullet category bails', () => {
@@ -295,10 +382,25 @@ describe('generateReleaseNotes guards', () => {
     expect(res.reason).toMatch(/GA/);
   });
 
-  it('skips a version at or below the floor', () => {
+  it('skips a version older than the floor', () => {
     const res = generateReleaseNotes({ body: BODY, tag: 'v26.2.1', date: '2026-09-15', pageContent: page() });
     expect(res.status).toBe('skipped');
     expect(res.reason).toMatch(/floor/);
+  });
+
+  it('inserts the floor version itself when the page has no section for it', () => {
+    // A fresh page for a new line: its floor is the line's first release.
+    const res = generateReleaseNotes({
+      body: BODY, tag: 'v26.2.2', date: '2026-08-21', pageContent: page({ withV2622: false }),
+    });
+    expect(res.status).toBe('ok');
+    expect(res.content).toMatch(/^== v26\.2\.2 \(2026-08-21\)$/m);
+  });
+
+  it('skips the floor version when the page already has its section', () => {
+    const res = generateReleaseNotes({ body: BODY, tag: 'v26.2.2', date: '2026-08-21', pageContent: page() });
+    expect(res.status).toBe('skipped');
+    expect(res.reason).toMatch(/already/);
   });
 
   it('skips a version already on the page (idempotent re-run)', () => {
@@ -345,7 +447,7 @@ describe('generateReleaseNotes phase 2 (insert a curated section)', () => {
     expect(res.status).toBe('ok');
     // Curated labels are kept (proves it used the curated section, not rebuilt
     // from a body — a rebuild would carry no Area:: labels).
-    expect(res.content).toContain('Cluster:: Reconnection logic is hardened');
+    expect(res.content).toContain('Cluster::\n* Reconnection logic is hardened');
     expect(res.content.indexOf('== v26.2.3')).toBeLessThan(res.content.indexOf('== v26.2.2'));
     // The scattered fixture is clustered on the way in: the order changed, and
     // the result is itself cluster-stable.
@@ -357,9 +459,10 @@ describe('generateReleaseNotes phase 2 (insert a curated section)', () => {
     const res = generateReleaseNotes({
       section: '== v26.2.2 (2026-08-21)\n\n=== Features\n\nrpk:: x.\n',
       tag: 'v26.2.2',
-      pageContent: page({ floor: '26.2.2' }),
+      pageContent: page({ floor: '26.2.3', withV2622: false }),
     });
     expect(res.status).toBe('skipped');
+    expect(res.reason).toMatch(/floor/);
   });
 
   it('throws when both body and section are given', () => {

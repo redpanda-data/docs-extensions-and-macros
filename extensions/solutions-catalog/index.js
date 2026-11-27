@@ -28,11 +28,14 @@
  *                        `solutions-catalog` (set here, not at beforePublish,
  *                        because pages are composed before beforePublish fires)
  *   beforePublish        assets/data/solutions.json, assets/data/solutions-graph.json,
- *                        solutions/<slug>/agent-companion.md per built solution
+ *                        solutions/<slug>/agent-companion.md per built solution,
+ *                        with its agent-companion-part-<n>.md files
  *                        (agent_companion), optional GitHub release check (network_checks)
  *
- * When the build has no `solutions` component every hook is a no-op, so the
- * extension can ship to docs-site before the content source exists.
+ * When the build has no `solutions` component every hook but beforeProcess is a
+ * no-op, so the extension can ship to docs-site before the content source
+ * exists. beforeProcess turns on asciidoc.sourcemap for the whole site, because
+ * the component is not known yet at that point (see the comment there).
  */
 
 const { raiseListenerLimit } = require('../util/raise-listener-limit')
@@ -59,7 +62,7 @@ const EXCLUDED_DOC_COMPONENTS = ['solutions', 'home', 'shared', 'search', 'data-
 // recommendations on, and section indexes match broad categories by accident.
 const UMBRELLA_LAYOUTS = [
   'home', 'component-home-v3', 'data-platform', 'labs-home', 'labs-search', 'search', '404',
-  'index', 'index-list', 'solutions-home', 'solution', 'solution-step',
+  'index', 'index-list', 'solutions-home', 'solution', 'solution-step', 'solution-production',
 ]
 
 const DEFAULTS = Object.freeze({
@@ -79,6 +82,11 @@ const DEFAULTS = Object.freeze({
   // and signed-in readers download it through the gated endpoint, so its
   // owner/name is not published unless a playbook says the repository is public.
   publicRepo: false,
+  // Findings about Product Docs pages (a related doc that no longer resolves, a
+  // fragment that matches no id there) warn by default, because those pages
+  // change in other repositories and the site build would fail on someone
+  // else's merge. The solutions repository's CI sets strict to make them fatal.
+  strict: false,
 })
 
 /**
@@ -95,6 +103,7 @@ function resolveConfig (config = {}, env = process.env) {
   const draftDownloadsRaw = pick('draftDownloads', 'draft_downloads')
   const agentCompanionRaw = pick('agentCompanion', 'agent_companion')
   const publicRepoRaw = pick('publicRepo', 'public_repo')
+  const strictRaw = pick('strict', 'strict')
   const envDrafts = env.SOLUTIONS_INCLUDE_DRAFTS
   const includeDrafts = includeDraftsRaw !== undefined
     ? isTrue(includeDraftsRaw)
@@ -111,6 +120,9 @@ function resolveConfig (config = {}, env = process.env) {
     draftDownloads,
     agentCompanion: agentCompanionRaw === undefined ? DEFAULTS.agentCompanion : isTrue(agentCompanionRaw),
     publicRepo: publicRepoRaw === undefined ? DEFAULTS.publicRepo : isTrue(publicRepoRaw),
+    strict: strictRaw !== undefined
+      ? isTrue(strictRaw)
+      : env.SOLUTIONS_STRICT !== undefined ? isTrue(env.SOLUTIONS_STRICT) : DEFAULTS.strict,
   }
 }
 
@@ -284,6 +296,7 @@ function buildCompanion (record, sources, logger, { titleOf, errors } = {}) {
     return null
   }
   if (result.leaks.length) logger.warn(`solutions-catalog: ${record.id}: AsciiDoc left in the agent companion (${result.leaks.join(', ')})`)
+  for (const warning of result.warnings || []) logger.warn(`solutions-catalog: ${warning}`)
   if (!result.rules.some((r) => r.rule)) {
     const message = `${record.id}: no step sets page-solution-rule, so the agent companion has no Rules, Design contract rules, or Acceptance for an agent to apply`
     if (record.status === 'published' && errors) errors.push(message)
@@ -291,7 +304,9 @@ function buildCompanion (record, sources, logger, { titleOf, errors } = {}) {
   }
   const dir = overview.out.path.replace(/[^/]*$/, '')
   const base = (record.url || `/${dir}`).replace(/[^/]*$/, '')
-  return { id: record.id, path: `${dir}${companion.FILE_NAME}`, url: `${base}${companion.FILE_NAME}`, markdown: result.markdown }
+  // The part files are published beside the core file, at the URLs its How to use this lists.
+  const parts = (result.parts || []).map((p) => ({ path: `${dir}${p.fileName}`, url: `${base}${p.fileName}`, markdown: p.markdown }))
+  return { id: record.id, path: `${dir}${companion.FILE_NAME}`, url: `${base}${companion.FILE_NAME}`, markdown: result.markdown, parts }
 }
 
 /**
@@ -415,6 +430,7 @@ module.exports.register = function ({ config = {} }) {
       const result = validate.validateSolution(record, {
         categoryMap, facetVocab, taxonomy, resolveDoc, solutionIds, pageByUrl, umbrellaLayouts: UMBRELLA_LAYOUTS, isCloudPage, cloudTwinsOf,
         fullIncludes: state.fullIncludes.get(record.module) || [],
+        strict: settings.strict,
       })
       errors.push(...result.errors)
       warnings.push(...result.warnings)
@@ -630,8 +646,10 @@ module.exports.register = function ({ config = {} }) {
       siteCatalog.addFile({ contents: outputs.toJsonBuffer(state.docConcepts), out: { path: `${ASSET_DIR}/${recsIndex.INDEX_FILENAME}` } })
       logger.info(`solutions-catalog: published ${ASSET_DIR}/${recsIndex.INDEX_FILENAME} (${state.docConcepts.docs.length} doc pages)`)
     }
-    for (const { path, markdown } of state.companions) {
-      siteCatalog.addFile({ contents: Buffer.from(markdown, 'utf8'), out: { path } })
+    for (const { path, markdown, parts = [] } of state.companions) {
+      for (const file of [{ path, markdown }, ...parts]) {
+        siteCatalog.addFile({ contents: Buffer.from(file.markdown, 'utf8'), out: { path: file.path } })
+      }
     }
     if (state.companions.length) logger.info(`solutions-catalog: published ${state.companions.length} agent companion${state.companions.length === 1 ? '' : 's'}`)
 

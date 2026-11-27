@@ -15,11 +15,11 @@ const { getAntoraStructure } = require('./antora');
  *
  * Use tags for released content (GA or beta), branches for in-progress content.
  * When using GitHub URLs, requires either --tag or --branch to be specified.
- * Auto-prepends "operator/" for tags when using redpanda-operator repository.
+ * Auto-prepends "operator/" for tags when using the operator-enterprise repository.
  *
  * @param {Object} args - Arguments
  * @param {string} [args.chart_dir] - Chart directory, root, or GitHub URL
- * @param {string} [args.tag] - Git tag for released content when using GitHub URL (auto-prepends "operator/" for redpanda-operator repository)
+ * @param {string} [args.tag] - Git tag for released content when using GitHub URL (auto-prepends "operator/" for the operator-enterprise repository)
  * @param {string} [args.branch] - Branch name for in-progress content when using GitHub URL
  * @param {string} [args.readme] - Relative README.md path inside each chart dir
  * @param {string} [args.output_dir] - Where to write generated AsciiDoc files

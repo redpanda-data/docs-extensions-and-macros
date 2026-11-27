@@ -1,0 +1,4 @@
+= About components
+:description: Fixture catalog page. component_type_dropdown links a connector page's use-case chips here (connect:components:about.adoc).
+
+component_table::[]

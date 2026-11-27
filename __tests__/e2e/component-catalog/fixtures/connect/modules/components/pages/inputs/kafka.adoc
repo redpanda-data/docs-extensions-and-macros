@@ -1,0 +1,4 @@
+= kafka
+:description: Fixture page for the kafka component.
+
+Fixture page.

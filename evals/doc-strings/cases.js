@@ -19,6 +19,11 @@
  *   verified like a rewrite (re-lint clean, extraction intact, substance
  *   restored). Its sabotage swaps in a fully conforming rewording, where the
  *   model must stay silent and the case therefore fails.
+ * - unchanged-lines: behavior C for lines the PR did not touch. A string
+ *   ships whole, but the author wrote only the changed lines; any
+ *   suggestion must keep every unchanged line of the declaration byte for
+ *   byte. Its sabotage is `sabotagePromptEdits`: the production prompt
+ *   with the rule that scopes review to changed lines reverted.
  * - negative-review / negative-audit: behavior C. Fully conforming input;
  *   the model FAILS the case by producing any suggestion or claiming any
  *   finding. `sabotageEdits` swaps in a violating fixture to prove the case
@@ -79,6 +84,40 @@ const CASES = [
     expectRules: ['starts-lowercase', 'rpk-terminal-period']
   },
   {
+    id: 'connect-xref-module',
+    kind: 'rewrite',
+    description: 'Connect field description with a module-less xref, which breaks on the Cloud page; the link must stay and gain a module',
+    layout: 'connect-input',
+    edits: [{
+      find: 'f = f.Description("Only things whose name starts with this prefix are read.")',
+      replace: 'f = f.Description("Only things whose name starts with this prefix are read. To filter on other attributes, use a xref:bloblang/about.adoc[Bloblang] mapping.")'
+    }],
+    target: 'prefix',
+    targetKind: 'field',
+    language: 'go',
+    columnLimit: null,
+    singleLine: true,
+    expectRules: ['connect-xref-module'],
+    // Deleting the link, or qualifying it with a module the page is not in,
+    // also re-lints clean, so the link must survive with the page's real
+    // module (modules/guides/pages/bloblang/about.adoc in rp-connect-docs).
+    stringMustMatch: 'xref:(?:connect:)?guides:bloblang/about\\.adoc\\['
+  },
+  {
+    id: 'connect-short-description-markup',
+    kind: 'rewrite',
+    description: 'Connect ShortDescription with inline markup, which form-based editors show literally; the rewrite must be plain text in the shared helper',
+    layout: 'connect-common',
+    target: 'storage_account',
+    targetKind: 'field-short',
+    targetRule: 'connect-short-description-markup',
+    language: 'go',
+    columnLimit: null,
+    expectRules: ['connect-short-description-markup'],
+    stringMustMatch: '[Ss]torage account',
+    stringMustNotMatch: '[`*]|xref:|https?://'
+  },
+  {
     id: 'upstream-clean',
     kind: 'upstream',
     description: 'UPSTREAMABLE override ported into the C++ source; audit must reclassify it REDUNDANT afterwards',
@@ -123,8 +162,7 @@ const CASES = [
       find: '      "Maximum size of a batch processed by the server. If the batch is "\n' +
             '      "compressed, the limit applies to the compressed batch size. Default "\n' +
             '      "is 1048576 bytes.",',
-      replace: '      "Controls how the server processes large requests. Default is "\n' +
-               '      "1048576 bytes.",'
+      replace: '      "Controls how the server processes large requests.",'
     }],
     // Sabotage: the same fully conforming rewording negative-property-diff
     // uses. The model must rightly stay silent on it, which makes this
@@ -135,11 +173,14 @@ const CASES = [
             '      "is 1048576 bytes.",',
       replace: '      "Maximum size in bytes of a batch processed by the server. If the "\n' +
                '      "batch is compressed, this limit applies to the compressed batch "\n' +
-               '      "size. Default is 1048576 bytes.",'
+               '      "size.",'
     }],
-    // The vacuous string dodges every rule (its default is concrete, so
-    // sentinel-default-unexplained stays silent) while saying nothing about WHAT is
-    // limited. The removed diff lines show the model the original, so a
+    // The vacuous string dodges every rule while saying nothing about WHAT
+    // is limited. Earlier versions of these fixtures also restated the
+    // concrete default ("Default is 1048576 bytes."), which the standard says
+    // to delete; the old hand-written prompt did not carry that rule, so the
+    // "conforming" text only looked conforming. Each fixture now plants only
+    // the defect its case tests. The removed diff lines show the model the original, so a
     // substantive rewrite names the thing: a batch.
     mustMentionAny: ['batch']
   },
@@ -150,14 +191,13 @@ const CASES = [
     layout: 'properties',
     target: 'kafka_batch_max_bytes',
     columnLimit: 80,
-    terminologyFixture: 'terminology.md',
     diffEdits: [{
       find: '      "Maximum size of a batch processed by the server. If the batch is "\n' +
             '      "compressed, the limit applies to the compressed batch size. Default "\n' +
             '      "is 1048576 bytes.",',
-      replace: '      "Maximum size of a batch the redpanda broker accepts. If the batch "\n' +
-               '      "is compressed, the limit applies to the compressed batch size. "\n' +
-               '      "Default is 1048576 bytes.",'
+      replace: '      "Maximum size in bytes of a batch the redpanda broker accepts. If "\n' +
+               '      "the batch is compressed, the limit applies to the compressed "\n' +
+               '      "batch size.",'
     }],
     // Sabotage: identical rewording with the canonical casing; the model
     // must stay silent there, so this case fails, proving it can fail.
@@ -165,9 +205,9 @@ const CASES = [
       find: '      "Maximum size of a batch processed by the server. If the batch is "\n' +
             '      "compressed, the limit applies to the compressed batch size. Default "\n' +
             '      "is 1048576 bytes.",',
-      replace: '      "Maximum size of a batch the Redpanda broker accepts. If the batch "\n' +
-               '      "is compressed, the limit applies to the compressed batch size. "\n' +
-               '      "Default is 1048576 bytes.",'
+      replace: '      "Maximum size in bytes of a batch the Redpanda broker accepts. If "\n' +
+               '      "the batch is compressed, the limit applies to the compressed "\n' +
+               '      "batch size.",'
     }],
     mustMentionAny: ['Redpanda'],
     mustNotMention: ['redpanda']
@@ -183,7 +223,7 @@ const CASES = [
             '      "is 1048576 bytes.",',
       replace: '      "Maximum size in bytes of a batch processed by the server. If the "\n' +
                '      "batch is compressed, this limit applies to the compressed batch "\n' +
-               '      "size. Default is 1048576 bytes.",'
+               '      "size.",'
     }],
     sabotageEdits: [{
       find: '      "Maximum size of a batch processed by the server. If the batch is "\n' +
@@ -191,6 +231,95 @@ const CASES = [
             '      "is 1048576 bytes.",',
       replace: '      "batch max bytes",'
     }]
+  },
+  {
+    id: 'negative-connect-diff',
+    kind: 'negative-review',
+    description: 'Diff with a conforming connect field rewording; the model must post no comment and write no doc-impact file',
+    layout: 'connect-input',
+    diffEdits: [{
+      find: 'f = f.Description("Only things whose name starts with this prefix are read.")',
+      replace: 'f = f.Description("Only things whose names begin with this prefix are read.")'
+    }],
+    sabotageEdits: [{
+      find: 'f = f.Description("Only things whose name starts with this prefix are read.")',
+      replace: 'f = f.Description("Only things whose name starts with this prefix are read. To filter on other attributes, use a xref:bloblang/about.adoc[Bloblang] mapping.")'
+    }]
+  },
+  {
+    // streaming-enterprise PR 461: the author rewrote the --regex paragraphs
+    // of rpk topic delete's Long text, and the review then rewrote lines
+    // nobody touched (quotes around a command, example topic names).
+    id: 'unchanged-lines-kept',
+    kind: 'unchanged-lines',
+    description: "rpk Long text with a few changed paragraphs; any suggestion must keep every line the PR did not change",
+    layout: 'rpk-pr461',
+    headFixture: 'delete.head.go',
+    target: 'delete',
+    sabotagePromptEdits: [{
+      find: '- The whole declaration ships, so read all of it, but review only\n' +
+            '  the lines this PR changed. A line the PR did not change is a\n' +
+            '  finding only when this change makes it wrong: it now\n' +
+            '  contradicts the changed lines or the code. Its wording, style\n' +
+            '  and term choices are out of scope even where they break the\n' +
+            '  standard; the author did not write them in this PR. A lint\n' +
+            '  finding is in scope only on a changed line, and the lint\n' +
+            '  reports only those: an issue\'s `line` is the changed line its\n' +
+            '  text is on, and an issue with no `line` is about the whole\n' +
+            '  declaration, so fix it through the changed lines or leave it.\n' +
+            '  A suggestion fixes the changed lines and any line the change\n' +
+            '  made wrong, and keeps every other line byte-identical.\n',
+      replace: '- The whole declaration ships, so judge all of it, not only the\n' +
+               '  lines this PR changed, and fix every problem it has in one\n' +
+               '  suggestion.\n'
+    }]
+  },
+  {
+    // redpanda-data/connect#4860: a PR reworded one line of oracledb_cdc's
+    // Description, and the review commented on the untouched == Metadata
+    // list, whose field names lack inline code. The lint now reports only
+    // findings on changed lines, so this diff is lint-clean, and the review
+    // must leave the list alone.
+    id: 'connect-untouched-metadata',
+    kind: 'negative-review',
+    description: 'One reworded line in a connect Description whose untouched == Metadata list lacks inline code; the review must post nothing',
+    layout: 'connect-oracledb',
+    diffEdits: [{
+      find: 'The input reads the redo log and emits one message per row change.',
+      replace: 'The input reads the online redo log and emits one message per row change.'
+    }],
+    // Sabotage: the changed line itself names a field bare, so the lint
+    // reports it and the review must comment.
+    sabotageEdits: [{
+      find: 'The input reads the redo log and emits one message per row change.',
+      replace: 'The input reads the online redo log and sets table_owner on each message.'
+    }]
+  },
+  {
+    // The sibling of connect-untouched-metadata: the changed line names a
+    // field bare. The review must fix that line and keep the untouched,
+    // equally bare Metadata list byte-identical.
+    id: 'connect-changed-line-finding',
+    kind: 'changed-line-finding',
+    description: 'A connect Description whose changed line names a field without inline code; the review must fix that line and keep the untouched == Metadata list',
+    layout: 'connect-oracledb',
+    target: 'oracledb_cdc',
+    // A component's summary and description share its name; the description
+    // is the declaration this suggestion may change.
+    targetKind: 'description',
+    targetRule: 'missing-inline-code',
+    // The PR adds a table_owner field and names it on the changed line, so
+    // the sentence cannot lose it: the fix must keep the word and format it.
+    diffEdits: [{
+      find: 'The input reads the redo log and emits one message per row change.',
+      replace: 'The input reads the redo log for the tables that table_owner owns and emits one message per row change.'
+    }, {
+      find: 'Field(service.NewStringField("dsn").Description("The connection string for the Oracle database."))',
+      replace: 'Field(service.NewStringField("dsn").Description("The connection string for the Oracle database.")).\n' +
+        '\t\tField(service.NewStringField("table_owner").Description("The schema that owns the tables to stream."))'
+    }],
+    fixedToken: 'table_owner',
+    untouchedTokens: ['database_schema', 'table_name']
   },
   {
     id: 'negative-metrics-file',
