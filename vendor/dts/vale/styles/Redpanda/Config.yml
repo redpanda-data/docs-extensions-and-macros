@@ -1,0 +1,8 @@
+# Checks: 'config' instead of 'configuration'
+extends: existence
+message: "Use 'configuration' instead of '%s'."
+link: https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/terminology.md#do-not-use-word-list
+level: warning
+ignorecase: true
+tokens:
+  - '(?<!-)\bconfigs?\b(?!-)'

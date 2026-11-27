@@ -300,6 +300,14 @@ describe('operator and Helm chart versions per docs version', () => {
     expect(helmChartLookups).toEqual(['v26.2.4'])
   })
 
+  it('passes the Helm chart index to every chart lookup', () => {
+    const helmChartIndex = ['26.2.6', '26.1.14']
+    const { helmChartIndexPassed } = runExtension(scenario({ versions: ['26.2', '26.1'], helmChartIndex }))
+
+    expect(helmChartIndexPassed.length).toBeGreaterThan(0)
+    for (const passed of helmChartIndexPassed) expect(passed).toEqual(helmChartIndex)
+  })
+
   it('pins 25.1 to its own operator and chart, not the newest chart', () => {
     // On release/v25.1.x the chart lives at a different path and its newest
     // published version (25.1.3) trails the operator (v25.1.4).
@@ -325,6 +333,50 @@ describe('operator and Helm chart versions per docs version', () => {
     expect(warnings).toHaveLength(2)
     expect(warnings[0]).toMatch(/No stable Redpanda Operator release found for the 24\.3 line, so ROOT 24\.3 keeps latest-operator-version from its antora\.yml \(v2\.3\.8-24\.3\.6\)/)
     expect(warnings[1]).toMatch(/No Redpanda Helm chart release found for the 24\.3 line, so ROOT 24\.3 keeps latest-redpanda-helm-chart-version/)
+  })
+
+  // EOL lines get no more releases and their docs are frozen, so keeping the
+  // antora.yml value is expected there and is logged at info level.
+  it.each([
+    ['page-is-past-eol (compute-end-of-life)', { 'page-is-past-eol': 'true' }],
+    ['page-eol (antora.yml)', { 'page-eol': true }],
+    ['page-release-date older than the support window', { 'page-release-date': '2024-12-03' }],
+  ])('logs at info, not warn, when an EOL line keeps its antora.yml values: %s', (_, eolAttributes) => {
+    const { attributesByVersion, warnings, infos } = runExtension(scenario({
+      versions: ['26.2', '24.3'],
+      attributesForVersion: {
+        '24.3': { 'latest-operator-version': 'v2.3.8-24.3.6', 'latest-redpanda-helm-chart-version': '5.10.1', ...eolAttributes },
+      },
+    }))
+
+    expect(attributesByVersion['24.3']['latest-operator-version']).toBe('v2.3.8-24.3.6')
+    expect(attributesByVersion['24.3']['latest-redpanda-helm-chart-version']).toBe('5.10.1')
+    expect(warnings).toEqual([])
+    expect(infos).toEqual(expect.arrayContaining([
+      expect.stringMatching(/No stable Redpanda Operator release found for the 24\.3 line, so ROOT 24\.3 keeps latest-operator-version/),
+      expect.stringMatching(/No Redpanda Helm chart release found for the 24\.3 line, so ROOT 24\.3 keeps latest-redpanda-helm-chart-version/),
+    ]))
+  })
+
+  it('still warns for a supported line that keeps its antora.yml values', () => {
+    const { warnings } = runExtension(scenario({
+      versions: ['26.2', '24.3'],
+      attributesForVersion: {
+        '24.3': { 'latest-operator-version': 'v2.3.8-24.3.6', 'latest-redpanda-helm-chart-version': '5.10.1', 'page-is-past-eol': 'false', 'page-release-date': '2999-01-01' },
+      },
+    }))
+
+    expect(warnings).toHaveLength(2)
+  })
+
+  it('still warns for an EOL line that falls back to the newest release', () => {
+    const { warnings } = runExtension(scenario({
+      versions: ['26.2', '24.3'],
+      attributesForVersion: { '24.3': { 'latest-redpanda-helm-chart-version': '', 'page-is-past-eol': 'true' } },
+    }))
+
+    expect(warnings).toHaveLength(2)
+    expect(warnings[0]).toMatch(/uses the newest release/)
   })
 
   it('falls back to the newest release when a line has no release and antora.yml sets nothing', () => {

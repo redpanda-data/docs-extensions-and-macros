@@ -353,8 +353,11 @@ function makeIncludeReader (root) {
  * @param {boolean} [input.candidatesOnly] - only candidates, aggregated across the pages
  * @param {boolean} [input.emptyOnly] - only pages that carry no page-categories
  *   Partials and examples are skipped: they are read through the pages that include them.
- * @returns {{minScore: Object, limit: Object, terminology: string[], suggestions: Array<Object>, needs: Array<Object>, candidates: Array<Object>}}
- *   minScore and limit are per page kind ({docs, solution}), as applied. With
+ * @returns {{minScore: Object, limit: Object, terminology: string[], suggestions: Array<Object>, needs: Array<Object>, candidates: Array<Object>, uncategorized: Array<Object>}}
+ *   minScore and limit are per page kind ({docs, solution}), as applied. Each
+ *   suggestion has the `line` it belongs on (its attribute's entry, else 1)
+ *   and `uncategorized` (the page has no page-categories); `uncategorized`
+ *   lists those pages with their suggestion count, zero included. With
  *   candidatesOnly, only { terminology, candidates }, one entry per term with
  *   its pages.
  */
@@ -367,11 +370,14 @@ function suggestFiles ({ root, files, taxonomy, minScore, limit, emptyOnly = fal
   const needs = []
   const candidates = []
   const perPage = []
+  const uncategorized = []
   for (const file of files) {
     // A partial or an example is read through the pages that include it.
     if (/(?:^|\/)(?:partials|examples)\//.test(file)) continue
     const content = fs.readFileSync(path.resolve(root, file), 'utf8')
-    if (emptyOnly && parseHeader(content).some((e) => e.name === CATEGORY_ATTRIBUTE && e.value.trim())) continue
+    const header = parseHeader(content)
+    const categorized = header.some((e) => e.name === CATEGORY_ATTRIBUTE && e.value.trim())
+    if (emptyOnly && categorized) continue
     const parts = pageParts(content, parseHeader, { file, readInclude })
     // A corpus run counts a term once per page too, then keeps terms seen twice overall.
     const found = pageCandidates(parts, labelMatcher, { terminology: terms, ...(candidatesOnly ? { minCount: 1, max: Infinity } : {}) })
@@ -380,14 +386,21 @@ function suggestFiles ({ root, files, taxonomy, minScore, limit, emptyOnly = fal
       continue
     }
     const r = suggestForPage(content, { taxonomy, parseHeader, matcher, minScore, limit, file, readInclude })
-    for (const s of r.suggestions) suggestions.push({ file, kind: r.kind, ...s })
+    if (!categorized) uncategorized.push({ file, kind: r.kind, suggestions: r.suggestions.length })
+    // The line a suggestion belongs on: its attribute's entry, else the
+    // page's first line, so a PR annotation lands where the value goes.
+    const lineOf = (attribute) => {
+      const entry = header.find((e) => e.name === attribute)
+      return entry ? entry.start : 1
+    }
+    for (const s of r.suggestions) suggestions.push({ file, kind: r.kind, line: lineOf(s.attribute), uncategorized: !categorized, ...s })
     for (const n of r.needs) needs.push({ file, kind: r.kind, ...n })
     for (const c of found) candidates.push({ file, ...c })
   }
   const terminologySources = terminology ? terminology.sources : []
   if (candidatesOnly) return { terminology: terminologySources, candidates: aggregateCandidates(perPage) }
   const perKind = (value, defaults) => (value === undefined ? { ...defaults } : { docs: value, solution: value })
-  return { minScore: perKind(minScore, DEFAULT_MIN_SCORE), limit: perKind(limit, DEFAULT_LIMIT), terminology: terminologySources, suggestions, needs, candidates }
+  return { minScore: perKind(minScore, DEFAULT_MIN_SCORE), limit: perKind(limit, DEFAULT_LIMIT), terminology: terminologySources, suggestions, needs, candidates, uncategorized }
 }
 
 /**
@@ -431,7 +444,7 @@ function formatText (result) {
     let last = null
     for (const s of result.suggest.suggestions) {
       if (s.file !== last) {
-        out.push(`SUGGEST ${s.file}`)
+        out.push(`SUGGEST ${s.file}${s.uncategorized ? ' (no page-categories yet)' : ''}`)
         last = s.file
       }
       const implied = s.implies.length ? `; implies ${s.implies.map((i) => i.label).join(', ')}` : ''
@@ -442,6 +455,9 @@ function formatText (result) {
       }
     }
     for (const n of result.suggest.needs) out.push(`NEEDS   ${n.file} ${n.message}`)
+    for (const u of result.suggest.uncategorized || []) {
+      if (!u.suggestions) out.push(`NONE    ${u.file} has no page-categories, and its text names no concept above the minimum score`)
+    }
     for (const c of result.suggest.candidates) out.push(`TERM    ${c.file} "${c.term}" x${c.count} at ${c.lines.map(lineRef).join(', ')} (${c.facet || 'no facet'}, ${c.cue}): no concept matches`)
     out.push(`check-metadata --suggest: ${result.suggest.suggestions.length} suggestion(s) for ${new Set(result.suggest.suggestions.map((s) => s.file)).size} page(s) at min score ${result.suggest.minScore.docs} (Product Docs) and ${result.suggest.minScore.solution} (solutions)`)
   }

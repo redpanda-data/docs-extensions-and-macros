@@ -1,0 +1,5 @@
+= kafka_franz
+:page-aliases: components:inputs/kafka_franz.adoc
+
+Stand-in for a cloud-docs Connect stub, which includes the connect page and
+declares its path as a page alias.

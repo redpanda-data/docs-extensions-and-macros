@@ -240,14 +240,14 @@ function rank (classification) {
   return classification === 'broken' ? 0 : classification === 'unverifiable' ? 1 : 2
 }
 
-async function checkUrl (url, { timeout, fetchFn = module.exports._fetch }) {
+async function checkUrl (url, { timeout, userAgent = USER_AGENT, fetchFn = module.exports._fetch }) {
   let lastError
   for (const attempt of [{ method: 'HEAD' }, { method: 'GET' }, { method: 'GET', retry: true }]) {
     try {
       const response = await fetchFn(url, {
         method: attempt.method,
         redirect: 'follow',
-        headers: { 'user-agent': USER_AGENT },
+        headers: { 'user-agent': userAgent },
         signal: AbortSignal.timeout(timeout),
       })
       const status = response.status
@@ -277,5 +277,6 @@ async function runWithConcurrency (items, limit, task) {
 // Indirection so tests can stub the HTTP layer without a network.
 module.exports._fetch = (...args) => fetch(...args)
 module.exports.checkUrl = checkUrl
+module.exports.runWithConcurrency = runWithConcurrency
 module.exports.collectExternalUrls = collectExternalUrls
 module.exports.repoSlug = repoSlug

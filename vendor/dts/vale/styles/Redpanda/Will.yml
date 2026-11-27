@@ -1,0 +1,9 @@
+# Checks: future tense 'will'
+extends: existence
+message: "Use present tense instead of '%s' where you can."
+link: https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/style-guide.md#specific-guidance
+level: suggestion
+# "you will be able to:" is the required lead-in above learning objectives.
+ignorecase: true
+tokens:
+  - '\bwill\b(?!\s+be\s+able\s+to\b)'

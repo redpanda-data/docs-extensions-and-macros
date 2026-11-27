@@ -8,7 +8,8 @@
 //
 // This module does ONLY the deterministic, no-judgment work: split into
 // sections, join wrapped bullet lines, strip source noise, unescape backticks,
-// de-duplicate backport repeats, and normalize category order/case. It does NOT
+// link known configuration properties, de-duplicate backport repeats, and
+// normalize category order/case. It does NOT
 // rewrite voice, add `Area::` labels, normalize units, phrase CVEs, or drop
 // bodyless entries — those need editorial judgment and belong to the curation
 // step that runs on the generated page.
@@ -88,16 +89,41 @@ function stripLeadingIssueRef(text) {
  * the editorial curation step.
  *
  * @param {string} raw - The joined raw bullet text.
+ * @param {Object} [options]
+ * @param {Set<string>} [options.propertyNames] - Known property names to link (see linkProperties).
  * @return {string} The cleaned entry text.
  */
-function cleanEntry(raw) {
+function cleanEntry(raw, { propertyNames } = {}) {
   let text = raw.replace(/\s+/g, ' ').trim();
   text = stripLeadingIssueRef(text);
   text = stripAttribution(text);
   text = text.replace(/\\`/g, '`');
+  text = linkProperties(text, propertyNames);
   text = normalizeUnits(text);
   text = escapeAsciiDocBraces(text);
   return text.trim();
+}
+
+/**
+ * Rewrites a backticked configuration property name as a `prop:` macro with
+ * `link=true`, so the page links it to the property reference. Without
+ * `link=true`, the macro shows only a hover tooltip. Engineers cannot write `prop:` in
+ * the source, because nothing resolves it outside the docs build, so this is
+ * where the link is added.
+ *
+ * Only an exact match for a known name is rewritten: `` `retention.ms` `` is,
+ * `` `retention.ms=1000` `` and `` `health_manager` `` are not. A name with no
+ * `_` or `.` (such as `admin` or `rack`) is never rewritten, because in prose
+ * those words usually mean something other than the property.
+ *
+ * @param {string} text - The entry text, with backticks already unescaped.
+ * @param {Set<string>} [propertyNames] - Known property names. Without it, the text is returned unchanged.
+ * @return {string} The text with known property names as `prop:<name>[link=true]`.
+ */
+function linkProperties(text, propertyNames) {
+  if (!propertyNames || propertyNames.size === 0) return text;
+  return text.replace(/`([\w.-]+)`/g, (match, name) =>
+    /[_.]/.test(name) && propertyNames.has(name) ? `prop:${name}[link=true]` : match);
 }
 
 /**
@@ -131,11 +157,13 @@ function escapeAsciiDocBraces(text) {
  * grouped by canonical category in page order.
  *
  * @param {string} body - The raw GitHub Release body markdown.
+ * @param {Object} [options]
+ * @param {Set<string>} [options.propertyNames] - Known property names to link as `prop:` macros.
  * @return {{sections: Array<{kind: string, title: string, entries: string[]}>}}
  *   Sections in page order (Features, Bug fixes, Improvements); a category with
  *   no entries is omitted.
  */
-function parseReleaseBody(body) {
+function parseReleaseBody(body, { propertyNames } = {}) {
   if (typeof body !== 'string' || body.trim() === '') {
     throw new Error('Release body is empty.');
   }
@@ -155,7 +183,7 @@ function parseReleaseBody(body) {
 
   const flush = () => {
     if (current !== null && currentKind && buckets[currentKind]) {
-      const entry = cleanEntry(current);
+      const entry = cleanEntry(current, { propertyNames });
       if (entry) buckets[currentKind].push(entry);
     }
     current = null;
@@ -231,6 +259,7 @@ module.exports = {
   stripAttribution,
   stripLeadingIssueRef,
   cleanEntry,
+  linkProperties,
   normalizeUnits,
   escapeAsciiDocBraces,
   PAGE_ORDER,

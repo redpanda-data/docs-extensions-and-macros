@@ -1,0 +1,8 @@
+# Checks: the ADP acronym in prose
+extends: existence
+message: "Spell out 'Agentic Data Plane'. Don't use the acronym '%s'."
+link: https://github.com/redpanda-data/docs-team-standards/blob/main/resources/writing-style/terminology.md#do-not-use-word-list
+level: error
+ignorecase: false
+tokens:
+  - '\bADP\b'

@@ -1,0 +1,124 @@
+= rpk Docs Links Test
+:description: Shows how doc-tools generate rpk-docs converts docs.redpanda.com URLs in rpk help text into xrefs, with and without a lender checkout.
+
+`doc-tools generate rpk-docs` converts the docs.redpanda.com URLs in rpk help text into xrefs before it writes each page, the same way `generate crd-spec` does. It maps URLs against the docs checkout it runs in. Pages of another component, such as Redpanda Connect, convert only when that component's checkout is passed with `--lender`.
+
+Each case shows the help text as rpk prints it (Before) and the line as the generator writes it with `--lender ../rp-connect-docs` (After). The help text is trimmed from `raw_tree` in the docs repo's `docs-data/rpk-v26.2.2.json`. The After lines were produced by the converter against this build's stand-in components (`preview/links-lender-streaming`, `preview/links-lender-streaming-26.1` and `preview/links-lender-connect`), so every xref below resolves in this build. This playbook does not run the url-to-xref extension, so any URL left raw on this page was left raw by the generator.
+
+A same-component xref (`module:page`) resolves against the component of the page it is on. A generated rpk page is in the `streaming` component, so those cases render on a stand-in generated page in that component: xref:streaming:reference:rpk/rpk-cluster/rpk-cluster-storage-restore-start.adoc[].
+
+== Same-component URL
+
+What you should see: the URL becomes a `module:page` xref with no component prefix, and the link on the stand-in rpk page opens the Whole Cluster Restore page.
+
+.Before
+[,asciidoc]
+----
+https://docs.redpanda.com/current/manage/disaster-recovery/whole-cluster-restore/
+----
+
+.After
+[,asciidoc]
+----
+xref:manage:disaster-recovery/whole-cluster-restore.adoc[]
+----
+
+Renders on xref:streaming:reference:rpk/rpk-cluster/rpk-cluster-storage-restore-start.adoc#same-component-url[the stand-in rpk page].
+
+== Connect URL with a lender
+
+What you should see: with the Connect checkout loaded, each URL becomes a `connect:` xref, and each link below opens a Connect page. Without the lender, both stay raw and the run output says the connect component was not loaded.
+
+.Before
+[,asciidoc]
+----
+A stream processor for mundane tasks - https://docs.redpanda.com/redpanda-connect
+Find out more about Bloblang at: https://docs.redpanda.com/redpanda-connect/guides/bloblang/about
+----
+
+.After
+[,asciidoc]
+----
+A stream processor for mundane tasks - xref:connect:home:index.adoc[]
+Find out more about Bloblang at: xref:connect:guides:bloblang/about.adoc[]
+----
+
+Renders as:
+
+A stream processor for mundane tasks - xref:connect:home:index.adoc[]
+
+Find out more about Bloblang at: xref:connect:guides:bloblang/about.adoc[]
+
+== Versioned URL
+
+What you should see: a URL that names the latest version (26.2) becomes an unversioned xref, and a URL pinned to an older version (26.1) becomes a `26.1@streaming:` xref whose link opens the 26.1 stand-in page. The 26.1 case needs a checkout of that version, such as the docs `v/26.1` branch, passed with `--lender`; without one it falls back to the latest page, as the url-to-xref extension does on a site that no longer publishes that version.
+
+.Before
+[,asciidoc]
+----
+https://docs.redpanda.com/26.2/manage/disaster-recovery/whole-cluster-restore/
+https://docs.redpanda.com/streaming/26.1/manage/disaster-recovery/whole-cluster-restore/
+----
+
+.After
+[,asciidoc]
+----
+xref:manage:disaster-recovery/whole-cluster-restore.adoc[]
+xref:26.1@streaming:manage:disaster-recovery/whole-cluster-restore.adoc[]
+----
+
+The first renders on xref:streaming:reference:rpk/rpk-cluster/rpk-cluster-storage-restore-start.adoc#versioned-url[the stand-in rpk page]. The second renders as: xref:26.1@streaming:manage:disaster-recovery/whole-cluster-restore.adoc[]
+
+== URL with an anchor
+
+What you should see: the fragment is kept, the link text is the heading it points at (Assignment), and the link opens that section. An anchor the target page does not have stays a raw URL and is reported as a missing anchor.
+
+.Before
+[,asciidoc]
+----
+https://docs.redpanda.com/redpanda-connect/guides/bloblang/about/#assignment
+----
+
+.After
+[,asciidoc]
+----
+xref:connect:guides:bloblang/about.adoc#assignment[Assignment]
+----
+
+Renders as: xref:connect:guides:bloblang/about.adoc#assignment[Assignment]
+
+== Trailing period
+
+What you should see: the sentence period stays outside the xref, so the link works and the sentence still ends with a period.
+
+.Before
+[,asciidoc]
+----
+For more information, visit https://docs.redpanda.com/current/manage/disaster-recovery/whole-cluster-restore/.
+----
+
+.After
+[,asciidoc]
+----
+For more information, visit xref:manage:disaster-recovery/whole-cluster-restore.adoc[].
+----
+
+Renders on xref:streaming:reference:rpk/rpk-cluster/rpk-cluster-storage-restore-start.adoc#trailing-period[the stand-in rpk page].
+
+== Admin API URL that stays raw
+
+What you should see: the URL is unchanged and renders as an ordinary link, because `/api/` is served by the API reference outside the Antora catalog. The rpk validation report lists it as info with that reason.
+
+.Before
+[,asciidoc]
+----
+refer to the admin API docs of the filter and order-by fields of the ListKafkaConnections endpoint: https://docs.redpanda.com/api/doc/admin/version/11f41833-5783-4f1a-ad64-5957267abd52/operation/operation-redpanda-core-admin-v2-clusterservice-listkafkaconnections
+----
+
+.After
+[,asciidoc]
+----
+refer to the admin API docs of the filter and order-by fields of the ListKafkaConnections endpoint: https://docs.redpanda.com/api/doc/admin/version/11f41833-5783-4f1a-ad64-5957267abd52/operation/operation-redpanda-core-admin-v2-clusterservice-listkafkaconnections
+----
+
+Renders as: refer to the admin API docs of the filter and order-by fields of the ListKafkaConnections endpoint: https://docs.redpanda.com/api/doc/admin/version/11f41833-5783-4f1a-ad64-5957267abd52/operation/operation-redpanda-core-admin-v2-clusterservice-listkafkaconnections

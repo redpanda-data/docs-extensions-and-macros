@@ -1,0 +1,7 @@
+# HELP vectorized_alien_receive_batch_queue_length Current receive batch queue length
+# TYPE vectorized_alien_receive_batch_queue_length gauge
+vectorized_alien_receive_batch_queue_length{shard="0"} 0.000000
+vectorized_alien_receive_batch_queue_length{shard="1"} 0.000000
+# HELP vectorized_cluster_partition_records_produced Total number of records produced
+# TYPE vectorized_cluster_partition_records_produced counter
+vectorized_cluster_partition_records_produced{namespace="kafka",partition="0",shard="0",topic="logins"} 42
